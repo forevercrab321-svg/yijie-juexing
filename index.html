@@ -1,0 +1,292 @@
+
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    
+    <!-- Mobile Native Optimization Meta Tags -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="format-detection" content="telephone=no" />
+    
+    <title>转生·艾塞尔加德公会</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      /*
+        重定义调色板，而不是逐个改组件的类名。
+        全站有几十处 bg-slate-900 / text-cyan-400 / border-indigo-500，
+        改类名既慢又容易漏；把色板本身换掉，一次生效且不会有漏网的。
+
+        原则（取自旷野之息的 UI）：
+          · 结构色只有一套暖石板，不用纯黑——纯黑会让画面发死
+          · 点缀色只有金，其余全部收敛过去
+          · 功能色只保留两个：铜绿(生机/成功)、暖橙(注意/紧急)
+
+        代价是语义漂移：代码里写 cyan，渲染出来是铜绿。
+        这是刻意的取舍——先拿到统一的视觉，语义等美术定稿后再统一重命名。
+      */
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              // 石板：全站结构色
+              slate: {
+                50:  '#f7f2e8', 100: '#ede4d3', 200: '#d4c9b4', 300: '#b8ab94',
+                400: '#9c907a', 500: '#7d735f', 600: '#574c3e', 700: '#3d352b',
+                800: '#2e2820', 900: '#24201b', 950: '#1c1815',
+              },
+              // 金：唯一的主点缀
+              amber: {
+                50:  '#fbf6e9', 100: '#f4ebd4', 200: '#e8cf94', 300: '#d9bc79',
+                400: '#c9a961', 500: '#b8964e', 600: '#9a7c3e', 700: '#7a6131',
+                800: '#5c4926', 900: '#3f321a', 950: '#241c0f',
+              },
+              yellow: {
+                300: '#e8cf94', 400: '#c9a961', 500: '#b8964e', 600: '#9a7c3e',
+              },
+              // 铜绿：生机 / 成功。emerald 与 cyan 收敛到同一系，避免画面出现两种绿
+              emerald: {
+                100: '#d9e8e0', 200: '#b4d2c4', 300: '#8fbca8', 400: '#6d9b87',
+                500: '#578270', 600: '#44685a', 700: '#354f45', 800: '#28372f', 900: '#1c2621',
+              },
+              cyan: {
+                100: '#dae7e9', 200: '#b6d0d4', 300: '#93b8bf', 400: '#7ba2ab',
+                500: '#628691', 600: '#4d6b74', 700: '#3b5158', 800: '#2b3a3f', 900: '#1e282c',
+              },
+              // 靛蓝与紫：全部并入石板+金，不再作为独立色相出现
+              indigo: {
+                100: '#e4dcc9', 200: '#cfc3a8', 300: '#b3a586', 400: '#95886b',
+                500: '#786c53', 600: '#5c5240', 700: '#443c2e', 800: '#302a20', 900: '#221d16',
+              },
+              purple: {
+                200: '#dcc9a8', 300: '#c2ab85', 400: '#a68e69', 500: '#8a7452',
+                600: '#6b5940', 700: '#4e4030', 800: '#352b20', 900: '#241d15',
+              },
+              violet: { 400: '#a68e69', 500: '#8a7452', 600: '#6b5940' },
+              // 暖橙：注意 / 紧急。取代刺目的正红
+              red: {
+                100: '#f2ddce', 200: '#e5bfa4', 300: '#d79c74', 400: '#c87a45',
+                500: '#ad6236', 600: '#8c4d29', 700: '#6b3b20', 800: '#4a2a17', 900: '#2e1b0f',
+                950: '#1d1109',
+              },
+              sky: { 400: '#7ba2ab', 500: '#628691', 600: '#4d6b74' },
+            },
+            fontFamily: {
+              sans: ['Noto Serif SC', 'Inter', 'serif'],
+              serif: ['Noto Serif SC', 'serif'],
+              mono: ['ui-monospace', 'SFMono-Regular', 'monospace'],
+            },
+            transitionTimingFunction: {
+              DEFAULT: 'cubic-bezier(0.16, 1, 0.3, 1)',
+              soft: 'cubic-bezier(0.16, 1, 0.3, 1)',
+            },
+          },
+        },
+      };
+    </script>
+    
+    <!--
+      字体：Cinzel 承担西文标题的古典感，Noto Serif SC 让中文也是衬线。
+      中文若退回系统无衬线，会和 Cinzel 的气质割裂——这是"廉价感"最常见的来源之一。
+    -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Noto+Serif+SC:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+     crossorigin=""/>
+
+    <style>
+      :root {
+        --sat: env(safe-area-inset-top);
+        --sab: env(safe-area-inset-bottom);
+        --sal: env(safe-area-inset-left);
+        --sar: env(safe-area-inset-right);
+
+        /* ── 色板 ────────────────────────────────────────────────
+           取自旷野之息的 UI 语言：深石板底、柔金描边、米白文字。
+           刻意避开纯黑与高饱和霓虹——那是赛博朋克的语汇，不是这里的。
+           点缀色只有两个（铜绿、暖橙），多了就散。 */
+        --ink:            #1c1815;  /* 最深，用于压底 */
+        --stone-deep:     #24201b;  /* 面板底 */
+        --stone:          #322c25;  /* 面板亮面 */
+        --stone-edge:     #4a4136;  /* 分隔线 */
+
+        --parchment:      #ede4d3;  /* 主文字，米白偏暖 */
+        --parchment-dim:  #b8ab94;  /* 次要文字 */
+        --parchment-mute: #7d735f;  /* 弱化文字 */
+
+        --gold:           #c9a961;  /* 主点缀。比纯金 #D4AF37 沉，不刺眼 */
+        --gold-bright:    #e8cf94;  /* 高亮态 */
+        --gold-dim:       rgba(201, 169, 97, 0.32);
+
+        --verdigris:      #6d9b87;  /* 铜绿，用于「成功 / 生机」 */
+        --ember:          #c87a45;  /* 暖橙，用于「注意 / 紧急」 */
+
+        /* ── 动效 ──────────────────────────────────────────────
+           重量感来自缓出而非弹跳。塞尔达的 UI 几乎没有 bounce。 */
+        --ease-out-soft:  cubic-bezier(0.16, 1, 0.3, 1);
+        --dur-slow:       620ms;
+        --dur-base:       380ms;
+      }
+
+      body {
+        margin: 0;
+        overflow: hidden; /* Prevent body scroll */
+        background-color: var(--ink);
+        font-family: 'Noto Serif SC', 'Inter', serif;
+        color: var(--parchment);
+        
+        /* Native App Feel Properties */
+        -webkit-tap-highlight-color: transparent; /* Remove blue tap highlight */
+        -webkit-touch-callout: none; /* Disable long press menu */
+        -webkit-user-select: none; /* Disable text selection */
+        user-select: none;
+        overscroll-behavior: none; /* Disable pull-to-refresh */
+        touch-action: pan-x pan-y; /* Optimize touch actions */
+        
+        /* Full height fix for mobile browsers */
+        height: 100vh;
+        height: 100dvh; 
+        width: 100vw;
+      }
+      
+      /* 西文走 Cinzel，中文自动落到 Noto Serif SC，两种文字都是衬线 */
+      h1, h2, h3, .fantasy-font {
+        font-family: 'Cinzel', 'Noto Serif SC', serif;
+        letter-spacing: 0.04em;
+      }
+
+      /*
+        组件里散落着 Tailwind 的 font-['Cinzel']，它只声明 Cinzel 一种字体，
+        中文会掉回系统无衬线，和标题的古典感割裂。这里统一补上中文衬线兜底。
+      */
+      [class*="font-['Cinzel']"] {
+        font-family: 'Cinzel', 'Noto Serif SC', serif !important;
+      }
+
+      /* Hide scrollbar but keep functionality */
+      .no-scrollbar::-webkit-scrollbar {
+        display: none;
+      }
+      .no-scrollbar {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+      }
+      
+      .leaflet-container {
+        width: 100%;
+        height: 100%;
+        background: #0f172a;
+        z-index: 0;
+        /* Prevent map from triggering selection */
+        -webkit-user-select: none;
+      }
+      
+      /*
+        面板材质：石板而非玻璃。
+        关键是三层——底色渐变给出体积、内高光模拟受光边、外阴影给出厚度。
+        只靠 backdrop-blur 的"毛玻璃"缺少材质，看久了会显得廉价。
+      */
+      .glass-panel,
+      .rune-panel {
+        background:
+          linear-gradient(160deg, rgba(50, 44, 37, 0.94) 0%, rgba(28, 24, 21, 0.96) 100%);
+        backdrop-filter: blur(10px) saturate(0.9);
+        -webkit-backdrop-filter: blur(10px) saturate(0.9);
+        border: 1px solid var(--gold-dim);
+        box-shadow:
+          inset 0 1px 0 rgba(237, 228, 211, 0.07),   /* 顶部受光 */
+          inset 0 -1px 0 rgba(0, 0, 0, 0.4),          /* 底部收边 */
+          0 14px 40px rgba(0, 0, 0, 0.55);            /* 投影厚度 */
+      }
+
+      /* 金色细描边。塞尔达的边框永远是细的——粗描边立刻变廉价 */
+      .rune-edge {
+        border: 1px solid var(--gold-dim);
+        box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+      }
+
+      /*
+        纸纹。用 SVG 湍流生成，不引外部图片。
+        极低的不透明度——它的作用是消除"纯色数字感"，不是让人看见纹理。
+      */
+      .parchment-noise::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        opacity: 0.055;
+        mix-blend-mode: overlay;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E");
+      }
+
+      /* 暗角。把注意力收回画面中心，也压掉地图边缘的城市噪点 */
+      .vignette::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        z-index: 2;
+        background: radial-gradient(
+          ellipse at center,
+          transparent 42%,
+          rgba(28, 24, 21, 0.28) 78%,
+          rgba(28, 24, 21, 0.62) 100%
+        );
+      }
+      
+      /* Smooth Momentum Scrolling for lists */
+      .scroll-touch {
+        -webkit-overflow-scrolling: touch;
+      }
+
+      /* Input fields should allow selection */
+      input, textarea {
+        -webkit-user-select: text;
+        user-select: text;
+      }
+
+      /* Custom animations */
+      @keyframes float {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-5px); }
+      }
+      
+      @keyframes spin-slow {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+      }
+      
+      @keyframes pulse-ring {
+        0% { transform: scale(0.8); opacity: 0.5; }
+        100% { transform: scale(2); opacity: 0; }
+      }
+
+      .animate-float {
+        animation: float 3s ease-in-out infinite;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://aistudiocdn.com/react@^19.2.1",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.1/",
+    "react/": "https://aistudiocdn.com/react@^19.2.1/",
+    "react-leaflet": "https://aistudiocdn.com/react-leaflet@^5.0.0",
+    "leaflet": "https://aistudiocdn.com/leaflet@^1.9.4",
+    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.556.0"
+  }
+}
+</script>
+</head>
+  <body>
+    <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>

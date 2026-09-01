@@ -1,0 +1,8 @@
+{
+  "name": "异界觉醒",
+  "description": "把现实纽约地图和二次元转生世界观结合的社区互助系统。玩家转生为冒险者，相貌由转生抽选随机决定、职业自行选择，在地图上接取委托、到指定地点行动并提交现场证明来完成任务并升级。",
+  "requestFramePermissions": [
+    "geolocation",
+    "microphone"
+  ]
+}

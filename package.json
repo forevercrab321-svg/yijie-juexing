@@ -1,0 +1,28 @@
+{
+  "name": "异界觉醒",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "assets": "node scripts/build-assets.ts",
+    "assets:images": "node scripts/build-assets.ts --images",
+    "assets:voices": "node scripts/build-assets.ts --voices"
+  },
+  "dependencies": {
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1",
+    "react-leaflet": "^5.0.0",
+    "leaflet": "^1.9.4",
+    "lucide-react": "^0.556.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0"
+  }
+}
