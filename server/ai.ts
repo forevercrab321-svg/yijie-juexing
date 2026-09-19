@@ -11,6 +11,7 @@
  */
 
 import { buildSpeechInstruction } from '../lib/elena';
+import { handleChat } from './chat';
 import {
   Env,
   HttpError,
@@ -23,8 +24,12 @@ import {
 
 const DEFAULT_BASE_URL = 'https://api.minimax.io';
 
-/** TTS 模型。hd 音质更好，turbo 更快更便宜。 */
-const TTS_MODEL = 'speech-2.6-hd';
+/**
+ * TTS 模型。hd 音质更好，turbo 更快更便宜。
+ * speech-2.6 在 2026-06-30 被列为 Legacy，默认改用 2.8；
+ * 想回退或换 turbo 只改环境变量，不动代码。
+ */
+const DEFAULT_TTS_MODEL = 'speech-2.8-hd';
 const DEFAULT_VOICE_ID = 'Chinese (Mandarin)_Lyrical_Voice';
 
 const TTS_MAX_CHARS = 300;
@@ -126,7 +131,7 @@ export async function handleTts(request: Request, env: Env): Promise<Response> {
     env,
     '/v1/t2a_v2',
     {
-      model: TTS_MODEL,
+      model: env.MINIMAX_TTS_MODEL || DEFAULT_TTS_MODEL,
       // 朗读指令与角色设定同源（lib/elena.ts），
       // 保证实时合成的音色与预生成音频听起来是同一个人。
       // 人设固定在服务端，客户端无法替换，避免把代理当通用 TTS 使用。
@@ -163,4 +168,5 @@ export async function handleTts(request: Request, env: Env): Promise<Response> {
 /** 路由表。dev 中间件与 Pages Functions 共用同一份实现。 */
 export const API_ROUTES: Record<string, (req: Request, env: Env) => Promise<Response>> = {
   '/api/tts': handleTts,
+  '/api/chat': handleChat,
 };

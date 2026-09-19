@@ -17,11 +17,11 @@
                           └────── server/ai.ts ───┘
                                 （唯一持有 MINIMAX_API_KEY 的地方）
                                           │
-                                    /v1/t2a_v2
-                                  艾琳娜语音 (speech-2.6-hd)
+                          /v1/t2a_v2          chat completions
+                        艾琳娜语音 (2.8-hd)    艾琳娜的大脑 (stream + tools)
 ```
 
-**运行时只剩语音一个模型调用。** 玩家相貌从 `public/assets/avatars/` 随机抽取，是现成的图片文件——应用不采集摄像头、不处理生物特征、不向任何模型发送用户数据。
+**运行时有两个模型调用：对话与语音。** 玩家相貌从 `public/assets/avatars/` 随机抽取，是现成的图片文件——应用不采集摄像头、不处理生物特征、不向任何模型发送用户数据。
 
 固定台词的语音已预生成到 `public/audio/elena/`，连 TTS 都不会在这些场景触发；只有含动态内容的语音才走 `/api/tts`。
 
@@ -68,6 +68,9 @@
 | `MINIMAX_GROUP_ID` | 否 | Chat Completions 不需要；T2A 在部分区域要求。配置后会作为查询参数附加到 `/v1/t2a_v2`。 |
 | `MINIMAX_BASE_URL` | 否 | 默认全球站 `https://api.minimax.io`（美国/海外 token plan 用这个）。美西低延迟节点 `https://api-uw.minimax.io`，中国大陆账号 `https://api.minimaxi.chat`。**区域端点只影响延迟，不构成数据驻留承诺**，见 PRIVACY.md 4.3。 |
 | `MINIMAX_TTS_VOICE_ID` | 否 | 默认 `Chinese (Mandarin)_Lyrical_Voice`。换音色不需要改代码。 |
+| `MINIMAX_TTS_MODEL` | 否 | 默认 `speech-2.8-hd`（2.6 系列已列为 Legacy）。 |
+| `MINIMAX_CHAT_MODEL` | 否 | 对话模型，默认 `MiniMax-M2.7`。**必须与账号实际开通的模型对上。** |
+| `MINIMAX_CHAT_PATH` | 否 | 默认 `/v1/text/chatcompletion_v2`。收到 `AI_CHAT_PATH_INVALID` 就换 `/v1/chat/completions`。 |
 
 ## 类型检查与构建
 
@@ -108,7 +111,16 @@ npm run build
 
 ## 艾琳娜
 
-角色设定、台词、立绘提示词全部集中在 [lib/elena.ts](lib/elena.ts)，那是她唯一的定义来源：
+她是一个**能即兴对话、并且能动手接委托的 NPC**，不只是按钮触发的固定台词。
+对话架构、怎么给她定性格、怎么接本地语音输入，见 [docs/elena-agent.md](docs/elena-agent.md)。
+
+- **性格**在 `ELENA_PERSONALITY`，一个普通对象，改完刷新即生效，不必重跑脚本。
+- **边界**在 `ELENA_SCOPE`，与性格分开放——她**只管委托**：发布、讲解、
+  确认还在不在、**确认接取**。所有委托的接取都经她之手。委托之外的事她不碰。
+- **语音输入**是 `lib/agent/stt.ts` 里的一个插槽，目前为空。不接任何云端 ASR，
+  由本地开源引擎在浏览器里完成，音频不出设备。
+
+角色设定、台词、立绘提示词、性格与系统提示词全部集中在 [lib/elena.ts](lib/elena.ts)，那是她唯一的定义来源：
 
 - `ELENA_PERSONA` —— 语气基调、立绘提示词、**能做的事与不做的事**。语音和形象共用这一份设定，保证"听起来的她"和"看起来的她"是同一个人。
 - `ELENA_LINES` —— 全部固定台词，每条一个稳定 id。
@@ -140,6 +152,7 @@ npm run build
 
 ```
 server/          平台无关的服务端 handler（唯一接触 API key 的地方）
+lib/agent/       艾琳娜的工具定义、工具执行、对话状态、本地语音插槽
 functions/api/   Cloudflare Pages Functions 适配层
 services/        前端 API 客户端
 lib/             证件号处理、地理计算

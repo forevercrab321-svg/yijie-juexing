@@ -19,6 +19,18 @@ export interface Env {
   MINIMAX_BASE_URL?: string;
   /** TTS 音色。默认中文女声，可在不改代码的情况下替换。 */
   MINIMAX_TTS_VOICE_ID?: string;
+  /** TTS 模型。默认 speech-2.8（2.6 已被列为 Legacy）。 */
+  MINIMAX_TTS_MODEL?: string;
+  /**
+   * 对话模型。必须与账号实际开通的模型对上，否则上游返回 400。
+   * MiniMax 的模型名随版本变动，所以不写死在代码里。
+   */
+  MINIMAX_CHAT_MODEL?: string;
+  /**
+   * 对话接口路径。原生 /v1/text/chatcompletion_v2（默认），
+   * OpenAI 兼容 /v1/chat/completions。收到 404 就换另一条。
+   */
+  MINIMAX_CHAT_PATH?: string;
   /** 逗号分隔的允许来源，例如 "https://aethelgard.app,https://www.aethelgard.app" */
   ALLOWED_ORIGINS?: string;
   /** 可选的 KV 命名空间绑定，用于跨实例限流。未绑定时降级为单实例内存限流。 */

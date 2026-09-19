@@ -13,8 +13,11 @@ import GuildBoard from './components/GuildBoard';
 import ProMembershipModal from './components/ProMembershipModal';
 import FriendsBoard from './components/FriendsBoard';
 import TrustVerification from './components/TrustVerification';
+import ElenaChat from './components/ElenaChat';
 import { Terminal as TerminalIcon, Users, MapPinOff } from 'lucide-react';
 import { useElenaVoice } from './hooks/useElenaVoice';
+import { useElenaAgent } from './hooks/useElenaAgent';
+import type { ToolContext } from './lib/agent/tools';
 import { watchLocation, GeoStatus, GeoFix } from './lib/geo';
 import { loadSession, saveSession, clearSession } from './lib/storage';
 
@@ -33,6 +36,7 @@ const App: React.FC = () => {
   const [showFriends, setShowFriends] = useState(false);
   const [showProof, setShowProof] = useState(false);
   const [showTrustVerification, setShowTrustVerification] = useState(false);
+  const [showElenaChat, setShowElenaChat] = useState(false);
   const [lang, setLang] = useState<'zh' | 'en'>('zh');
   const [startTime, setStartTime] = useState<number | null>(null);
   const [isAutoNav, setIsAutoNav] = useState(false);
@@ -42,7 +46,14 @@ const App: React.FC = () => {
   const [geoStatus, setGeoStatus] = useState<GeoStatus>('idle');
 
   // 語音：固定台词走预生成音频，动态内容才实时合成。见 lib/elena.ts
-  const { isSpeaking: isElenaSpeaking, expression: elenaExpression, speakLine } = useElenaVoice();
+  const {
+    isSpeaking: isElenaSpeaking,
+    expression: elenaExpression,
+    speakLine,
+    enqueueSpeech,
+    stop: stopElenaSpeech,
+    setExpression: setElenaExpression,
+  } = useElenaVoice();
 
   useEffect(() => {
     if (!user || !consent?.location) return;
@@ -74,12 +85,46 @@ const App: React.FC = () => {
     setShowProfile(false);
   };
 
-  const handleAccept = (quest: Quest) => {
+  /**
+   * 签下契约。
+   *
+   * silent 是给艾琳娜自己用的：她通过 accept_quest 工具接取时，会用自己的话
+   * 说明接了什么、在哪、多远。这时候再插一句预生成的固定台词，
+   * 等于把她说到一半的话掐断，听起来像两个人在抢麦。
+   */
+  const acceptQuest = (quest: Quest, opts?: { silent?: boolean }) => {
     setActiveQuestId(quest.id);
     setStartTime(Date.now());
     setShowBountyBoard(false);
-    speakLine('contract_signed');
+    if (!opts?.silent) speakLine('contract_signed');
   };
+
+  const handleAccept = (quest: Quest) => acceptQuest(quest);
+
+  /**
+   * 工具执行时看到的世界。
+   *
+   * 放进 ref 每次渲染刷新，而不是靠 useCallback 的依赖数组——
+   * 工具是在异步的对话流中途被调用的，闭包快照会让她读到几秒前的等级和任务状态。
+   */
+  const worldRef = useRef<ToolContext | null>(null);
+  worldRef.current = user
+    ? {
+        quests,
+        user,
+        activeQuestId,
+        userLocation: geoFix?.coords ?? null,
+        onFocus: (q) => setFocusedQuestId(q.id),
+        onAccept: (q) => acceptQuest(q, { silent: true }),
+      }
+    : null;
+
+  const elena = useElenaAgent({
+    getWorld: useCallback(() => worldRef.current!, []),
+    enqueueSpeech,
+    stopSpeech: stopElenaSpeech,
+    setExpression: setElenaExpression,
+  });
 
   if (!consent) {
     return <ConsentGate lang={lang} onAccept={setConsent} />;
@@ -273,6 +318,28 @@ const App: React.FC = () => {
           }}
         />
       )}
+
+      {/*
+        艾琳娜的对话层。挂在最外层、z-index 高于委托板，
+        所以在地图上和在任务大厅里都能继续跟她说话——她不是一个要「打开」的功能。
+      */}
+      <ElenaChat
+        open={showElenaChat}
+        onOpen={() => setShowElenaChat(true)}
+        onClose={() => { elena.interrupt(); setShowElenaChat(false); }}
+        turns={elena.turns}
+        thinking={elena.thinking}
+        isSpeaking={isElenaSpeaking}
+        expression={elenaExpression}
+        onSend={elena.send}
+        onInterrupt={elena.interrupt}
+        voiceOn={elena.voiceOn}
+        onToggleVoice={() => elena.setVoiceOn(!elena.voiceOn)}
+        micState={elena.micState}
+        micEngineName={elena.micEngineName}
+        onMicDown={elena.startListening}
+        onMicUp={elena.stopListening}
+      />
 
       {showProof && activeQuest && (
         <ProofSubmission

@@ -44,6 +44,9 @@ function devApiPlugin(env: Record<string, string>): Plugin {
               MINIMAX_GROUP_ID: env.MINIMAX_GROUP_ID,
               MINIMAX_BASE_URL: env.MINIMAX_BASE_URL,
               MINIMAX_TTS_VOICE_ID: env.MINIMAX_TTS_VOICE_ID,
+              MINIMAX_TTS_MODEL: env.MINIMAX_TTS_MODEL,
+              MINIMAX_CHAT_MODEL: env.MINIMAX_CHAT_MODEL,
+              MINIMAX_CHAT_PATH: env.MINIMAX_CHAT_PATH,
               ALLOWED_ORIGINS: env.ALLOWED_ORIGINS,
             });
           } catch (err) {
@@ -52,7 +55,25 @@ function devApiPlugin(env: Record<string, string>): Plugin {
 
           res.statusCode = response.status;
           response.headers.forEach((value, key) => res.setHeader(key, value));
-          res.end(Buffer.from(await response.arrayBuffer()));
+
+          // /api/chat 是 SSE。整段 arrayBuffer 会把流缓冲到结束才一次性吐出来，
+          // 那就完全没有流式可言了——艾琳娜会沉默几秒然后突然说完整段话。
+          // 有 body 就逐块写出去，让 dev 与 Cloudflare 的行为保持一致。
+          if (response.body) {
+            const reader = response.body.getReader();
+            try {
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                res.write(Buffer.from(value));
+              }
+            } finally {
+              reader.releaseLock();
+              res.end();
+            }
+          } else {
+            res.end();
+          }
         } catch (err) {
           console.error('[dev-api] 中间件异常:', err);
           res.statusCode = 500;
