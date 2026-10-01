@@ -266,13 +266,13 @@ const VerificationModal: React.FC<VerificationModalProps> = ({ onComplete, lang 
         {step === 1 && (
             <div className="flex-1 min-h-0 flex flex-col p-6 animate-in slide-in-from-right duration-500">
               <div className={`${stepBody} flex flex-col`}>
-                <div className="mt-4 mb-4 text-center shrink-0">
+                <div className="mt-4 mb-4 text-center shrink-0 [@media(max-height:640px)]:mt-1 [@media(max-height:640px)]:mb-2">
                     {/* 矮视口隐藏装饰图标：这一步的主角是立绘，每省下 80 px 都还给卡片 */}
                     <div className="w-16 h-16 mx-auto bg-slate-800/80 backdrop-blur rounded-2xl flex items-center justify-center border border-amber-500/30 mb-4 shadow-[0_0_20px_rgba(245,158,11,0.2)] [@media(max-height:820px)]:hidden">
                         <Dices className="w-8 h-8 text-amber-500" />
                     </div>
-                    <h1 className="text-3xl font-['Cinzel'] font-bold text-white tracking-widest">转生抽选</h1>
-                    <p className="text-xs text-slate-400 mt-2">你无法选择转生成什么，但可以再赌一次</p>
+                    <h1 className="text-3xl font-['Cinzel'] font-bold text-white tracking-widest [@media(max-height:640px)]:text-2xl">转生抽选</h1>
+                    <p className="text-xs text-slate-400 mt-2 [@media(max-height:640px)]:hidden">你无法选择转生成什么，但可以再赌一次</p>
                 </div>
 
                 {/*
@@ -282,7 +282,7 @@ const VerificationModal: React.FC<VerificationModalProps> = ({ onComplete, lang 
                   卡片高度跟着槽走、宽度按 3:4 反推，所以收缩时仍是同一比例的竖卡，不会被压扁。
                   下限 14rem 保证底部的种族名与说明不被裁掉，再矮就交给外层滚动兜底。
                 */}
-                <div className="mb-4 min-h-[14rem]" style={{ flex: '0 1 calc((min(100vw, 28rem) - 3rem) * 4 / 3)' }}>
+                <div className="min-h-[14rem]" style={{ flex: '0 1 calc((min(100vw, 28rem) - 3rem) * 4 / 3)' }}>
                   <div
                     data-testid="awaken-portrait-card"
                     className={`relative h-full max-w-full aspect-[3/4] mx-auto bg-slate-900 rounded-2xl overflow-hidden border-2 border-amber-500/40 shadow-2xl transition-all duration-300 ${isRolling ? 'opacity-40 scale-95' : 'opacity-100 scale-100'}`}
@@ -303,20 +303,26 @@ const VerificationModal: React.FC<VerificationModalProps> = ({ onComplete, lang 
                   </div>
                 </div>
 
-                <button
-                    onClick={reroll}
-                    disabled={isRolling}
-                    className="w-full shrink-0 bg-slate-900/80 border border-slate-700 hover:border-amber-500/50 text-slate-300 font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50"
-                >
-                    <Dices className={`w-4 h-4 ${isRolling ? 'animate-spin' : ''}`} />
-                    重新转生
-                </button>
               </div>
 
-                <div className="shrink-0 pt-3">
+                {/*
+                  两个按钮并排钉在底部，都不进滚动区。
+                  原先「重新转生」跟着立绘一起滚动，极矮视口（1000×546）下被滚动区的下缘裁掉一半，
+                  看起来像被主按钮压住了。次要动作放在主按钮旁边是标准做法，
+                  还省下一整行高度还给立绘——常见尺寸下从此完全不需要滚动。
+                */}
+                <div className="shrink-0 pt-3 flex gap-3">
+                    <button
+                        onClick={reroll}
+                        disabled={isRolling}
+                        className="flex-1 bg-slate-900/80 border border-slate-700 hover:border-amber-500/50 text-slate-300 font-bold py-4 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50"
+                    >
+                        <Dices className={`w-4 h-4 ${isRolling ? 'animate-spin' : ''}`} />
+                        重新转生
+                    </button>
                     <button
                         onClick={() => setStep(2)}
-                        className="w-full bg-amber-600 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg"
+                        className="flex-[1.6] bg-amber-600 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg"
                     >
                         就是这个我 <ArrowRight className="w-4 h-4" />
                     </button>
@@ -403,7 +409,8 @@ const VerificationModal: React.FC<VerificationModalProps> = ({ onComplete, lang 
                  <div data-testid="awaken-confirm-card" className="relative w-full max-w-sm rounded-3xl overflow-hidden border-2 border-amber-500 shadow-[0_0_50px_rgba(245,158,11,0.4)] bg-black">
                     <Portrait roll={roll} missing={artMissing} onMissing={markArtMissing} className="w-full h-80" />
 
-                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-transparent"></div>
+                    {/* 遮罩要盖到文字区（卡片中部）：天使、史莱姆等浅色立绘下，只压底部会让金色姓名糊进脸上（QA-R2-01） */}
+                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/60 to-slate-950/5"></div>
 
                     <div className="absolute bottom-0 left-0 right-0 p-6">
                         <div className="flex items-center gap-2 mb-2">

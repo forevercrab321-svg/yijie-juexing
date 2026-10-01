@@ -129,7 +129,7 @@ SwiftShader 下 fps 为 0.4–1，与真机无关；真机帧率与发热列为 
 
 | ID | 严重度 | 区域 | 问题 | 建议 |
 |---|---|---|---|---|
-| QA-R2-01 | P3 | ui | 觉醒「转生鉴定书」确认卡：姓名 / 种族 / 职业文字压在浅色立绘上（angel、slime、fairy 等 16 张立绘在文字区亮度 > 0.7），渐变遮罩只在底部变暗。`components/VerificationModal.tsx:406` | 遮罩改为 `from-slate-950 via-slate-950/70`，或给文字块单独加底色 |
+| QA-R2-01 | P3 | ui | 觉醒「转生鉴定书」确认卡：姓名 / 种族 / 职业文字压在浅色立绘上，渐变遮罩只在底部变暗。`components/VerificationModal.tsx:406` | **已修复**：遮罩改为 `from-slate-950 via-slate-950/60 to-slate-950/5`，盖到卡片中部的文字区 |
 | QA-R2-02 | P3 | ui | 无定位 / 不在纽约时，世界控件常驻的「回到我」提示框盖住默认视角里 q5 光柱的图标（仅视觉；`.wui-note` 是 `pointer-events:none`，光柱仍可点） | 提示框移到控件上方或改为图标 + 悬停文案 |
 | QA-R2-03 | P3 | ui | 切到英文后，证明提交面板（`ProofSubmission`）文案仍是中文 | 补齐英文串 |
 | QA-R1-11 | P3 | ui | 手机 390×844 上结算卡片盖住画面中心的玩家与 celebrate 演出上半部分 | 手机上把卡片贴到 TopHud 之下，或结算时镜头目标下移 |
@@ -137,6 +137,8 @@ SwiftShader 下 fps 为 0.4–1，与真机无关；真机帧率与发热列为 
 | QA-R1-13 | P3 | other | 艾琳娜立绘资产缺失（`public/assets/elena/*.jpg` 不存在）；契约终端占位把原始路径当文字显示（`components/BountyBoard.tsx:99`） | 占位只保留图标与名字；资产生成 API 未配置属既有限制 |
 | QA-R1-15 | P3 | integration | 进行中的委托不跨刷新保存（`activeQuestId` / `startTime` 只在 React state），刷新或被系统回收后需重新接取 | 把进行中状态落到 `localStorage` 存档 |
 | QA-R1-16 | P3 | other | M2-02 的验证命令按字面执行会命中 docs 与 vendored skill 模板 | 已在本文件 1.1 节用排除 `docs/`、`.claude/` 的命令复核，产品本身满足要求 |
+
+**发布后追加修复**（觉醒第 2 步「转生抽选」）：「重新转生」原先跟随立绘在滚动区内，极矮视口（1000×546）下被滚动区下缘裁掉一半、看起来像被主按钮压住；现与「就是这个我」并排钉在底部、都不进滚动区，矮视口（≤640px）下副标题隐藏、标题缩一号。QA 的 `qa-r2-awaken-sizes.mjs` 在 11 种视口下 33/33 通过。
 
 ### 6.2 沙箱测不到、需要真机 / 真环境确认的项（UNVERIFIED）
 
