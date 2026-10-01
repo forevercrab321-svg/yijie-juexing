@@ -164,17 +164,31 @@ export const TRANSLATIONS = {
   }
 };
 
+/**
+ * 委托板。设计说明（每个委托的意图、职业覆盖、数值理由）见 docs/studio/design.md。
+ *
+ * 数值按 lib/progression.ts 的 REWARD_GUIDE 填写，新增委托照此办理：
+ *  - trustPoints = 该难度档的信任值；rewardGold = 取整到 10（档位赏金 × (30 + estimatedTime) / 60）；
+ *  - 魔素不在这里填，由 questMagicules 按难度、时长、是否紧急算出；
+ *  - minLevel 落在档位区间内，且 2–6 级每一级都至少解锁一个新委托；入门委托（minLevel 1）至少 20 分钟，保证第一次结算必升级；
+ *  - 坐标是真实地点（到场校验半径只有 200 m），新增委托不放 imageUrl（运行时不向第三方请求），也不写 rewardDesc
+ *    （它暗示线下有实物兑现，没有真实合作方之前不该承诺）。
+ * 职业覆盖：18 个职业每个被点名 2–3 次；其中 15 个在 1 级就有「适合你」的委托，
+ * 医护、安保、维修三类牵涉他人安全或财物，从 2 级（即完成第一个委托后）开始。
+ */
 export const INITIAL_QUESTS: Quest[] = [
+  // ── 1 级 · 入门：时代广场附近三个，散到西区、村、下城各一个，走出门就有能接的 ──
   {
+    // 新手第一单：就在默认镜头中心，紧急 + 公共空间，谁都能上手
     id: 'q1',
-    title: 'Time Square Cleanup',
+    title: 'Times Square Cleanup',
     description: 'The plaza is overcrowded with debris. Needs clearing.',
     realTask: 'Community Cleanup',
     location: [40.7580, -73.9855],
     locationName: 'Times Square',
     difficulty: QuestDifficulty.C,
     minLevel: 1,
-    trustPoints: 50,
+    trustPoints: 9,
     rewardGold: 100,
     type: '迷宫建设',
     estimatedTime: 30,
@@ -183,22 +197,87 @@ export const INITIAL_QUESTS: Quest[] = [
     imageUrl: 'https://images.unsplash.com/photo-1534430480872-3498386e7856?auto=format&fit=crop&w=800&q=80'
   },
   {
-    id: 'q2',
-    title: 'Central Park Patrol',
-    description: 'Monitor the ancient forest for anomalies.',
-    realTask: 'Park Safety Watch',
-    location: [40.785091, -73.968285],
-    locationName: 'Central Park',
-    difficulty: QuestDifficulty.B,
-    minLevel: 5,
-    trustPoints: 120,
-    rewardGold: 300,
-    type: '魔物讨伐',
-    estimatedTime: 60,
-    neededProfessions: [Profession.WARDEN, Profession.CHRONICLER, Profession.STRIDER],
-    imageUrl: 'https://images.unsplash.com/photo-1510265119258-db115b0e8172?auto=format&fit=crop&w=800&q=80'
+    // 老人的手机与邮箱：耐心比技术更重要，所以倾听者与导师同列
+    id: 'q4',
+    title: 'Library Rune Clinic',
+    description: 'Elders are locked out of their scrying mirrors. Soothe the machine spirits and teach the binding words.',
+    realTask: 'Senior Tech Help',
+    location: [40.7532, -73.9822],
+    locationName: 'New York Public Library',
+    difficulty: QuestDifficulty.D,
+    minLevel: 1,
+    trustPoints: 6,
+    rewardGold: 50,
+    type: '异界交涉',
+    estimatedTime: 45,
+    neededProfessions: [Profession.WEAVER, Profession.MENTOR, Profession.CONFIDANT],
   },
   {
+    // 迷路的旅人：语言、指路图、广播，语灵 / 幻绘师 / 传令者的入门委托
+    id: 'q5',
+    title: 'Grand Central Wayfinders',
+    description: 'Travelers from distant realms pour out of the Portal Hall, lost. Speak their tongues and draw them rune-maps.',
+    realTask: 'Traveler Help Desk',
+    location: [40.7527, -73.9772],
+    locationName: 'Grand Central Terminal',
+    difficulty: QuestDifficulty.D,
+    minLevel: 1,
+    trustPoints: 6,
+    rewardGold: 50,
+    type: '异界交涉',
+    estimatedTime: 40,
+    neededProfessions: [Profession.LINGUIST, Profession.ILLUMINATOR, Profession.HERALD],
+  },
+  {
+    // 入门就能体验「讨伐」：入侵植物就是魔物；拍照记录与计数是公民科学的真实做法
+    id: 'q6',
+    title: 'High Line Vine Purge',
+    description: 'Creeping vine-beasts are strangling the sky garden on the old iron rails. Uproot them and record every nest.',
+    realTask: 'Invasive Plant Removal',
+    location: [40.7478, -74.0047],
+    locationName: 'The High Line',
+    difficulty: QuestDifficulty.D,
+    minLevel: 1,
+    trustPoints: 6,
+    rewardGold: 60,
+    type: '魔物讨伐',
+    estimatedTime: 60,
+    neededProfessions: [Profession.CULTIVATOR, Profession.CHRONICLER, Profession.ASSAYER],
+  },
+  {
+    // 华盛顿广场的棋手是纽约名片；裁定者当裁判，规矩立得住也讲得清
+    id: 'q7',
+    title: 'Washington Square Tourney',
+    description: 'Young squires duel on sixty-four squares beneath the Arch. They need fair judges and patient masters.',
+    realTask: 'Youth Chess Day',
+    location: [40.7308, -73.9973],
+    locationName: 'Washington Square Park',
+    difficulty: QuestDifficulty.D,
+    minLevel: 1,
+    trustPoints: 6,
+    rewardGold: 60,
+    type: '异界交涉',
+    estimatedTime: 60,
+    neededProfessions: [Profession.ARBITER, Profession.MENTOR, Profession.CHRONICLER],
+  },
+  {
+    // 最短的入门委托（30 分钟）：向摊主谈下当天的余量，送进社区冰箱；行商的主场
+    id: 'q8',
+    title: 'Chelsea Market Harvest Run',
+    description: 'The market hall will discard a day of bounty. Bargain for it and haul it to the neighborhood frost-chests.',
+    realTask: 'Surplus Food Rescue',
+    location: [40.7424, -74.0060],
+    locationName: 'Chelsea Market',
+    difficulty: QuestDifficulty.D,
+    minLevel: 1,
+    trustPoints: 6,
+    rewardGold: 40,
+    type: '物资运输',
+    estimatedTime: 30,
+    neededProfessions: [Profession.TRADER, Profession.COURIER, Profession.HEARTHKEEPER],
+  },
+  {
+    // 原有的长线入门委托：桥面中段，离时代广场最远的 1 级委托（V4 测量视角用它）
     id: 'q3',
     title: 'Brooklyn Bridge Supply Run',
     description: 'Transport essential crystals to the outpost.',
@@ -207,13 +286,113 @@ export const INITIAL_QUESTS: Quest[] = [
     locationName: 'Brooklyn Bridge',
     difficulty: QuestDifficulty.D,
     minLevel: 1,
-    trustPoints: 30,
+    trustPoints: 6,
     rewardDesc: 'Free Bagel',
     rewardGold: 50,
     type: '物资运输',
     estimatedTime: 45,
     neededProfessions: [Profession.COURIER, Profession.ASSAYER, Profession.HEARTHKEEPER],
     imageUrl: 'https://images.unsplash.com/photo-1542384557-0e248b75f564?auto=format&fit=crop&w=800&q=80'
+  },
+
+  // ── 2–6 级 · 每升一级解锁至少一个；门槛是可靠性，不是技能 ──
+  {
+    // 2 级：经手邻居的物件与工具，要先有一次完成记录
+    id: 'q9',
+    title: 'Union Square Mending Fair',
+    description: 'Broken lanterns and lame iron steeds pile up in the square. Mend what can be mended; trade away the rest.',
+    realTask: 'Repair & Swap Fair',
+    location: [40.7361, -73.9909],
+    locationName: 'Union Square',
+    difficulty: QuestDifficulty.C,
+    minLevel: 2,
+    trustPoints: 9,
+    rewardGold: 150,
+    type: '迷宫建设',
+    estimatedTime: 60,
+    neededProfessions: [Profession.ARTIFICER, Profession.WEAVER, Profession.TRADER],
+  },
+  {
+    // 2 级、紧急：关系到他人身体，第一单之后才开放；完成第一个委托就会看到它亮起
+    id: 'q10',
+    title: 'Lincoln Center Field Aid',
+    description: 'The open-air bard festival is wilting under a merciless sun. Raise a water shrine and tend the fallen.',
+    realTask: 'First Aid & Water Station',
+    location: [40.7725, -73.9835],
+    locationName: 'Lincoln Center',
+    difficulty: QuestDifficulty.C,
+    minLevel: 2,
+    trustPoints: 9,
+    rewardGold: 130,
+    type: '紧急救援',
+    estimatedTime: 45,
+    neededProfessions: [Profession.MENDER, Profession.WARDEN, Profession.HERALD],
+    isUrgent: true,
+  },
+  {
+    // 3 级：经手别人的住房处境与隐私；把法条讲成人话、画成图
+    id: 'q11',
+    title: 'City Hall Decree Clinic',
+    description: 'Old Council decrees read like curses. Explain them to anxious tenants in their own tongue and plain pictures.',
+    realTask: 'Tenant Rights Clinic',
+    location: [40.7127, -74.0063],
+    locationName: 'City Hall Park',
+    difficulty: QuestDifficulty.C,
+    minLevel: 3,
+    trustPoints: 9,
+    rewardGold: 200,
+    type: '异界交涉',
+    estimatedTime: 90,
+    neededProfessions: [Profession.ARBITER, Profession.LINGUIST, Profession.ILLUMINATOR],
+  },
+  {
+    // 4 级：夜里面对处境脆弱的人，倾听排在第一位
+    id: 'q12',
+    title: 'Tompkins Night Hearth',
+    description: 'As the night chill falls, wanderers sleep on the square benches. Bring warm stew, blankets, and a listening ear.',
+    realTask: 'Warm Meal Outreach',
+    location: [40.7265, -73.9817],
+    locationName: 'Tompkins Square Park',
+    difficulty: QuestDifficulty.B,
+    minLevel: 4,
+    trustPoints: 15,
+    rewardGold: 400,
+    type: '紧急救援',
+    estimatedTime: 90,
+    neededProfessions: [Profession.CONFIDANT, Profession.MENDER, Profession.HEARTHKEEPER],
+  },
+  {
+    // 5 级：原有的巡逻委托
+    id: 'q2',
+    title: 'Central Park Patrol',
+    description: 'Monitor the ancient forest for anomalies.',
+    realTask: 'Park Safety Watch',
+    location: [40.785091, -73.968285],
+    locationName: 'Central Park',
+    difficulty: QuestDifficulty.B,
+    minLevel: 5,
+    trustPoints: 15,
+    rewardGold: 300,
+    type: '魔物讨伐',
+    estimatedTime: 60,
+    neededProfessions: [Profession.WARDEN, Profession.CHRONICLER, Profession.STRIDER],
+    imageUrl: 'https://images.unsplash.com/photo-1510265119258-db115b0e8172?auto=format&fit=crop&w=800&q=80'
+  },
+  {
+    // 6 级：长线目标。下城水边是真实的风暴潮淹水区；备汛不是紧急事件，所以不标紧急
+    id: 'q13',
+    title: 'Battery Seawall Muster',
+    description: 'A tide-wyrm stirs in the harbor. Raise sandbag ramparts along the old seawall before the storm season breaks.',
+    realTask: 'Storm Surge Sandbagging',
+    location: [40.7030, -74.0155],
+    locationName: 'Battery Park',
+    difficulty: QuestDifficulty.A,
+    minLevel: 6,
+    trustPoints: 24,
+    rewardGold: 1000,
+    type: '迷宫建设',
+    estimatedTime: 120,
+    neededProfessions: [Profession.MASON, Profession.ARTIFICER, Profession.STRIDER],
   }
 ];
 

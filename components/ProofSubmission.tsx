@@ -64,7 +64,18 @@ const ProofSubmission: React.FC<ProofSubmissionProps> = ({
     return () => { if (preview) URL.revokeObjectURL(preview); };
   }, [preview]);
 
+  /*
+   * 扫描 → 核对 → 评定 → 结算的计时链。
+   *
+   * 每一段都以「此刻仍在现场」为前提：原先这条链只看 status，上传那一刻过了校验，
+   * 之后离开现场、定位丢失或精度变差，界面已经改口说「你还没有到达现场」，结算却照常完成并发奖（QA-R1-03）。
+   * 现在 gate 不是 OK 时整条链暂停（依赖里有 gateOk，flip 的那一刻 cleanup 就清掉待触发的计时器），
+   * 回到现场后从当前这一段重新计时。选择暂停而不是作废：曼哈顿楼群里定位精度瞬间跳到 120 m 以上很常见，
+   * 抖一下就要重拍照片太苛刻；而「只有在现场时才会结算」这条不变量同样成立。
+   */
+  const gateOk = gate.kind === 'OK';
   useEffect(() => {
+    if (!gateOk) return;
     if (status === 'SCANNING') {
         const id = setTimeout(() => setStatus('ANALYZING'), 1500);
         return () => clearTimeout(id);
@@ -77,7 +88,7 @@ const ProofSubmission: React.FC<ProofSubmissionProps> = ({
         const id = setTimeout(() => onConfirm(), 1000);
         return () => clearTimeout(id);
     }
-  }, [status, onConfirm]);
+  }, [status, onConfirm, gateOk]);
 
   const blockedCopy: Record<Exclude<Gate['kind'], 'OK'>, { title: string; body: string }> = {
     NO_LOCATION: {
@@ -95,19 +106,25 @@ const ProofSubmission: React.FC<ProofSubmissionProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[1100] bg-black flex flex-col items-center justify-center font-mono">
-      {/* Background HUD Grid */}
+    /*
+      配色与文案（QA-R1-06）：原先是青色网格 + #22d3ee 扫描光 + PROOF_UPLOAD_PROTOCOL_V3 / Employer Neural Net 的赛博终端风，
+      正是简报列为反支柱的「赛博朋克青紫」。这些颜色都是写死的任意值或色板没定义的 cyan-950，重映射过的调色板管不到。
+      现在换成公会的语言：墨色底（不用纯黑）、金色网格与描边、羊皮纸色扫描光；结构与交互不变。
+      「雇主」一词也一并去掉——本平台明确是社区互助、不是雇佣平台（觉醒页的声明）。
+    */
+    <div className="fixed inset-0 z-[1100] bg-slate-950 flex flex-col items-center justify-center font-mono">
+      {/* 背景网格：金色细线，像契约纸上的格线 */}
       <div className="absolute inset-0 pointer-events-none opacity-20"
            style={{
-               backgroundImage: 'linear-gradient(0deg, transparent 24%, rgba(6, 182, 212, .3) 25%, rgba(6, 182, 212, .3) 26%, transparent 27%, transparent 74%, rgba(6, 182, 212, .3) 75%, rgba(6, 182, 212, .3) 76%, transparent 77%, transparent), linear-gradient(90deg, transparent 24%, rgba(6, 182, 212, .3) 25%, rgba(6, 182, 212, .3) 26%, transparent 27%, transparent 74%, rgba(6, 182, 212, .3) 75%, rgba(6, 182, 212, .3) 76%, transparent 77%, transparent)',
+               backgroundImage: 'linear-gradient(0deg, transparent 24%, rgba(201, 169, 97, .3) 25%, rgba(201, 169, 97, .3) 26%, transparent 27%, transparent 74%, rgba(201, 169, 97, .3) 75%, rgba(201, 169, 97, .3) 76%, transparent 77%, transparent), linear-gradient(90deg, transparent 24%, rgba(201, 169, 97, .3) 25%, rgba(201, 169, 97, .3) 26%, transparent 27%, transparent 74%, rgba(201, 169, 97, .3) 75%, rgba(201, 169, 97, .3) 76%, transparent 77%, transparent)',
                backgroundSize: '50px 50px'
            }}
       ></div>
 
       {/* Top Bar */}
       <div className="absolute top-0 left-0 right-0 p-4 flex justify-between items-center z-20">
-          <div className="text-[10px] text-cyan-500 bg-cyan-950/50 px-2 py-1 border border-cyan-800 rounded">
-              PROOF_UPLOAD_PROTOCOL_V3
+          <div className="text-[10px] text-amber-400 bg-amber-950/50 px-2 py-1 border border-amber-700/60 rounded tracking-widest">
+              委托证明 · PROOF OF DEED
           </div>
           <button onClick={onCancel} className="text-red-500 hover:text-red-400 p-2 border border-red-900/50 bg-red-950/20 rounded-full">
               <X className="w-5 h-5" />
@@ -126,6 +143,12 @@ const ProofSubmission: React.FC<ProofSubmissionProps> = ({
           <p className="text-xs text-slate-400 leading-relaxed mb-6 font-sans">
             {blockedCopy[gate.kind].body}
           </p>
+          {/* 扫描途中被拦：照片还在，回到现场会接着评定，不用重拍 */}
+          {status !== 'IDLE' && (
+            <p data-testid="proof-paused" className="text-[11px] text-amber-400/90 leading-relaxed -mt-3 mb-6 font-sans">
+              证明评定已暂停，回到现场后会自动继续。
+            </p>
+          )}
           <button
             onClick={onCancel}
             className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold py-3 rounded-xl transition-colors active:scale-95 font-sans"
@@ -138,10 +161,10 @@ const ProofSubmission: React.FC<ProofSubmissionProps> = ({
       {/* Main Scanner UI */}
       <div className="relative w-full max-w-sm aspect-[3/4] border-2 border-slate-800 bg-slate-900/40 rounded-3xl overflow-hidden flex flex-col items-center justify-center p-1">
          {/* Corner Brackets */}
-         <div className="absolute top-4 left-4 w-8 h-8 border-t-2 border-l-2 border-cyan-500"></div>
-         <div className="absolute top-4 right-4 w-8 h-8 border-t-2 border-r-2 border-cyan-500"></div>
-         <div className="absolute bottom-4 left-4 w-8 h-8 border-b-2 border-l-2 border-cyan-500"></div>
-         <div className="absolute bottom-4 right-4 w-8 h-8 border-b-2 border-r-2 border-cyan-500"></div>
+         <div className="absolute top-4 left-4 w-8 h-8 border-t-2 border-l-2 border-amber-500/70"></div>
+         <div className="absolute top-4 right-4 w-8 h-8 border-t-2 border-r-2 border-amber-500/70"></div>
+         <div className="absolute bottom-4 left-4 w-8 h-8 border-b-2 border-l-2 border-amber-500/70"></div>
+         <div className="absolute bottom-4 right-4 w-8 h-8 border-b-2 border-r-2 border-amber-500/70"></div>
 
          {/* Image Preview Layer */}
          {preview && (
@@ -154,35 +177,35 @@ const ProofSubmission: React.FC<ProofSubmissionProps> = ({
 
          {/* Scanning Overlay Animation */}
          {(status === 'SCANNING' || status === 'ANALYZING') && (
-            <div className="absolute inset-0 bg-cyan-500/10 z-10">
-                <div className="absolute top-0 left-0 right-0 h-1 bg-cyan-400 shadow-[0_0_15px_#22d3ee] animate-[scan_2s_ease-in-out_infinite]"></div>
+            <div className="absolute inset-0 bg-amber-500/10 z-10">
+                <div className="absolute top-0 left-0 right-0 h-1 bg-amber-200 shadow-[0_0_15px_rgba(232,207,148,0.75)] animate-[scan_2s_ease-in-out_infinite]"></div>
                 <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="w-48 h-48 border border-cyan-500/30 rounded-full animate-[spin_4s_linear_infinite] border-t-cyan-400 border-t-2"></div>
+                    <div className="w-48 h-48 border border-amber-500/30 rounded-full animate-[spin_4s_linear_infinite] border-t-amber-300 border-t-2"></div>
                 </div>
             </div>
          )}
 
          {/* Grading Overlay */}
          {status === 'GRADING' && (
-             <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-20 flex flex-col items-center justify-center animate-in fade-in">
+             <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm z-20 flex flex-col items-center justify-center animate-in fade-in">
                  <div className="text-amber-500 animate-pulse mb-4">
                      <Search className="w-12 h-12" />
                  </div>
                  <div className="text-amber-500 font-bold tracking-[0.3em] text-lg font-['Cinzel']">AWAITING EVALUATION</div>
-                 <div className="text-xs text-slate-400 mt-2">Connecting to Employer Neural Net...</div>
+                 <div className="text-xs text-slate-400 mt-2 font-sans">公会书记官正在登记这份委托…</div>
              </div>
          )}
 
          {/* IDLE State / Input Trigger */}
          {status === 'IDLE' && (
-             <label className="group relative w-40 h-40 rounded-full border-2 border-dashed border-slate-600 flex items-center justify-center cursor-pointer hover:border-cyan-500 hover:bg-cyan-950/30 transition-all z-10 active:scale-95">
+             <label className="group relative w-40 h-40 rounded-full border-2 border-dashed border-slate-600 flex items-center justify-center cursor-pointer hover:border-amber-500 hover:bg-amber-950/30 transition-all z-10 active:scale-95">
                  {/* capture 让移动端直接调起相机，减少「翻相册里的旧图」这一最简单的作弊路径 */}
                  <input type="file" accept="image/*" capture="environment" onChange={handleFileChange} className="hidden" />
-                 <div className="w-32 h-32 rounded-full bg-slate-800 flex items-center justify-center group-hover:shadow-[0_0_30px_rgba(6,182,212,0.3)] transition-shadow">
-                    <Scan className="w-10 h-10 text-slate-400 group-hover:text-cyan-400 transition-colors" />
+                 <div className="w-32 h-32 rounded-full bg-slate-800 flex items-center justify-center group-hover:shadow-[0_0_30px_rgba(201,169,97,0.3)] transition-shadow">
+                    <Scan className="w-10 h-10 text-slate-400 group-hover:text-amber-400 transition-colors" />
                  </div>
                  <div className="absolute -bottom-10 text-center w-full">
-                     <div className="text-cyan-500 font-bold tracking-widest text-sm animate-pulse">INITIATE SCAN</div>
+                     <div className="text-amber-400 font-bold tracking-widest text-sm animate-pulse font-sans">上传现场照片</div>
                  </div>
              </label>
          )}
@@ -190,14 +213,14 @@ const ProofSubmission: React.FC<ProofSubmissionProps> = ({
          {/* Status Text HUD */}
          {status !== 'GRADING' && status !== 'IDLE' && (
             <div className="absolute bottom-12 left-0 right-0 text-center z-10">
-                {status === 'SCANNING' && <div className="text-xs text-cyan-400 font-bold bg-black/50 inline-block px-3 py-1 rounded border border-cyan-900">ACQUIRING GEOSPATIAL DATA...</div>}
-                {status === 'ANALYZING' && <div className="text-xs text-emerald-400 font-bold bg-black/50 inline-block px-3 py-1 rounded border border-emerald-900">VERIFYING CONTENTS...</div>}
+                {status === 'SCANNING' && <div className="text-xs text-amber-300 font-bold bg-slate-950/60 inline-block px-3 py-1 rounded border border-amber-800 font-sans">正在核对现场位置…</div>}
+                {status === 'ANALYZING' && <div className="text-xs text-emerald-400 font-bold bg-slate-950/60 inline-block px-3 py-1 rounded border border-emerald-900 font-sans">正在核对照片内容…</div>}
             </div>
          )}
       </div>
 
       {/* 到场确认条 */}
-      <div className="mt-16 flex items-center gap-2 text-[11px] text-emerald-400 bg-emerald-950/40 border border-emerald-500/30 px-3 py-1.5 rounded-full">
+      <div className="mt-16 flex items-center gap-2 text-[11px] text-emerald-400 bg-emerald-900/40 border border-emerald-500/30 px-3 py-1.5 rounded-full">
         <Navigation className="w-3 h-3" />
         <span className="font-sans">已确认到场 · 距任务点 {formatDistance(gate.distance)}</span>
       </div>

@@ -96,6 +96,14 @@ export interface User {
   goldCoins: number;
   guildContribution: number;
   isProMember?: boolean;
+  /**
+   * 已结算过的委托 id，按完成顺序。
+   *
+   * 可选：这个字段晚于档案格式出现，老档案里没有，读档时由 lib/progression.ts 的 normalizeProgress 补成空数组
+   * （存档键与版本号因此不必改）。同一委托第二次结算不再发奖，靠的就是这份记录——
+   * 奖励变成真实结算以后，没有它，信任和经验就能靠同一个委托无限刷。
+   */
+  completedQuestIds?: string[];
 }
 
 export enum QuestDifficulty {

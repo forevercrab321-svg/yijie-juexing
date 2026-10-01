@@ -19,12 +19,14 @@ interface BountyBoardProps {
   expression?: ElenaExpression;
   /** 玩家的职业，用于标出「适合你」的委托 */
   userProfession?: Profession;
+  /** 已完成的委托：「承接」按钮提前显示「已完成」，不让玩家点了才知道（QA-R1-08） */
+  completedQuestIds?: string[];
 }
 
 const BountyBoard: React.FC<BountyBoardProps> = ({
   quests, onFocus, onAccept, activeQuestId, focusedQuestId, userLevel, onClose, lang,
   // 默认值需要显式标注：本项目未开 strict，带默认值的解构参数会被拓宽成 string
-  isSpeaking = false, expression = 'neutral' as ElenaExpression, userProfession
+  isSpeaking = false, expression = 'neutral' as ElenaExpression, userProfession, completedQuestIds
 }) => {
   const [viewState, setViewState] = useState<'GREETING' | 'TERMINAL'>('GREETING');
   const [currentIdx, setCurrentIdx] = useState(0);
@@ -144,17 +146,26 @@ const BountyBoard: React.FC<BountyBoardProps> = ({
           /* --- 任務終端：清晰、無雜亂排版 --- */
           <div className="w-full max-w-xl bg-black/60 backdrop-blur-3xl border border-[#D4AF37]/20 rounded-[3rem] overflow-hidden shadow-[0_40px_100px_rgba(0,0,0,1)] flex flex-col h-[650px] animate-in zoom-in-95 duration-500 relative">
             
-            {/* 分類導航：簡約化 */}
-            <div className="flex gap-2 p-6 overflow-x-auto no-scrollbar border-b border-white/5 bg-white/5">
-              {['ALL', '物资运输', '魔物讨伐', '迷宫建设', '紧急救援'].map(t => (
-                <button
-                  key={t}
-                  onClick={() => { setFilter(t); setCurrentIdx(0); }}
-                  className={`px-4 py-2 rounded-xl text-[9px] font-black tracking-widest uppercase transition-all whitespace-nowrap ${filter === t ? 'bg-[#D4AF37] text-black shadow-lg' : 'bg-white/5 text-white/30 hover:text-white'}`}
-                >
-                  {t === 'ALL' ? '全部委託' : t}
-                </button>
-              ))}
+            {/*
+              分類導航：簡約化。
+              五种委托类型都要有标签——原先漏了「异界交涉」，q4 / q5 / q7 / q11 只能在「全部委託」里翻到（QA-R1-07）。
+              「返回對話」放进同一行、在滚动区之外：原先它绝对定位在右上角，正好压在分类标签上（QA-R1-08）
+            */}
+            <div className="flex items-center border-b border-white/5 bg-white/5">
+              <div className="flex-1 min-w-0 flex gap-2 py-6 pl-6 pr-2 overflow-x-auto no-scrollbar">
+                {['ALL', '物资运输', '魔物讨伐', '迷宫建设', '异界交涉', '紧急救援'].map(t => (
+                  <button
+                    key={t}
+                    onClick={() => { setFilter(t); setCurrentIdx(0); }}
+                    className={`px-4 py-2 rounded-xl text-[9px] font-black tracking-widest uppercase transition-all whitespace-nowrap ${filter === t ? 'bg-[#D4AF37] text-black shadow-lg' : 'bg-white/5 text-white/30 hover:text-white'}`}
+                  >
+                    {t === 'ALL' ? '全部委託' : t}
+                  </button>
+                ))}
+              </div>
+              <button onClick={() => setViewState('GREETING')} className="shrink-0 self-stretch pl-2 pr-6 text-[8px] font-black text-[#D4AF37]/40 hover:text-[#D4AF37] transition-all flex items-center gap-1 uppercase tracking-widest whitespace-nowrap">
+                <ChevronLeft className="w-2 h-2" /> 返回對話
+              </button>
             </div>
 
             {/* 任務核心內容：清晰垂直排版 */}
@@ -218,12 +229,30 @@ const BountyBoard: React.FC<BountyBoardProps> = ({
                           <Sparkles className="w-4 h-4" /> +{activeQuest.trustPoints}P
                        </div>
                     </div>
-                    <button 
-                      onClick={() => onAccept(activeQuest)}
-                      className="bg-[#D4AF37] hover:bg-white text-black px-8 h-14 rounded-2xl font-black text-[11px] tracking-[0.3em] uppercase transition-all shadow-xl active:scale-95"
-                    >
-                      承接
-                    </button>
+                    {/*
+                      接不了的委托提前说清楚（QA-R1-08）：已完成 / 等级不足 / 手上已有别的委托时，按钮换成说明文字与暗色样式。
+                      仍然可以点——点了照样走 App 的 handleAccept，由它关掉终端、聚焦这个委托、在卡片上写明原因；
+                      这里只是不再让一个接不了的委托看起来「随时可以承接」。
+                    */}
+                    {(() => {
+                      const done = completedQuestIds?.includes(activeQuest.id) ?? false;
+                      const mine = activeQuest.id === activeQuestId;
+                      const levelShort = activeQuest.minLevel > userLevel;
+                      const busy = activeQuestId !== null && !mine;
+                      const blockedLabel = mine ? '進行中' : done ? '已完成' : levelShort ? `Lv${activeQuest.minLevel} 解鎖` : busy ? '已有委託' : null;
+                      return (
+                        <button
+                          data-testid="bounty-accept"
+                          data-blocked={blockedLabel ? 'true' : 'false'}
+                          onClick={() => onAccept(activeQuest)}
+                          className={blockedLabel
+                            ? 'bg-white/5 border border-white/10 text-white/45 px-6 h-14 rounded-2xl font-black text-[11px] tracking-[0.2em] uppercase transition-all active:scale-95 whitespace-nowrap'
+                            : 'bg-[#D4AF37] hover:bg-white text-black px-8 h-14 rounded-2xl font-black text-[11px] tracking-[0.3em] uppercase transition-all shadow-xl active:scale-95'}
+                        >
+                          {blockedLabel ?? '承接'}
+                        </button>
+                      );
+                    })()}
                   </div>
                 </div>
               ) : (
@@ -243,9 +272,6 @@ const BountyBoard: React.FC<BountyBoardProps> = ({
               )}
             </div>
 
-            <button onClick={() => setViewState('GREETING')} className="absolute top-6 right-8 text-[8px] font-black text-[#D4AF37]/40 hover:text-[#D4AF37] transition-all flex items-center gap-1 uppercase tracking-widest">
-              <ChevronLeft className="w-2 h-2" /> 返回對話
-            </button>
           </div>
         )}
       </div>

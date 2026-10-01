@@ -153,6 +153,17 @@ const VerificationModal: React.FC<VerificationModalProps> = ({ onComplete, lang 
       if (step > 0) setStep(s => s - 1);
   };
 
+  /*
+   * 视口适配（QA-R1-01）：整页 fixed + body overflow:hidden，页面本身永远不会滚动。
+   * 所以每一步都拆成「可滚动的内容区 + 钉在底部的主按钮」：
+   *   · 内容区 flex-1 min-h-0 —— 没有 min-h-0 时 flex 子项的最小高度等于内容高度，
+   *     内容一高就把主按钮挤出屏幕，而且没有任何地方可以滚；
+   *   · 主按钮不参与滚动 —— 新玩家第一眼就要看到「下一步」在哪，不能藏在滚动后面。
+   * 第 1 步的立绘卡另外随剩余高度等比收缩，常见的桌面与手机尺寸下根本不需要滚动；
+   * 滚动只是极矮视口（手机横屏）的兜底。
+   */
+  const stepBody = 'flex-1 min-h-0 overflow-y-auto no-scrollbar';
+
   return (
     <div className="fixed inset-0 z-[2000] flex flex-col items-center justify-center bg-black font-sans">
       {/* Hero Background Image */}
@@ -189,9 +200,14 @@ const VerificationModal: React.FC<VerificationModalProps> = ({ onComplete, lang 
 
         {/* STEP 0: 起名 */}
         {step === 0 && (
-          <div className="flex-1 flex flex-col p-6 animate-in slide-in-from-right duration-500">
+          <div className="flex-1 min-h-0 flex flex-col p-6 animate-in slide-in-from-right duration-500">
+           <div className={stepBody}>
             <div className="mt-4 mb-8 text-center">
-                <div className="w-16 h-16 mx-auto bg-slate-800/80 backdrop-blur rounded-2xl flex items-center justify-center border border-cyan-500/30 mb-4 shadow-[0_0_20px_rgba(6,182,212,0.2)]">
+                {/*
+                  光晕用色板里的铜绿（cyan-500 重映射后的值），原先写死的 rgba(6,182,212) 是饱和青色，绕过了色板。
+                  视口矮于 820 px（笔记本浏览器的内容区多在 630–790）时隐藏这枚装饰图标，把高度让给表单与立绘
+                */}
+                <div className="w-16 h-16 mx-auto bg-slate-800/80 backdrop-blur rounded-2xl flex items-center justify-center border border-cyan-500/30 mb-4 shadow-[0_0_20px_rgba(98,134,145,0.22)] [@media(max-height:820px)]:hidden">
                     <User className="w-8 h-8 text-cyan-500" />
                 </div>
                 <h1 className="text-3xl font-['Cinzel'] font-bold text-white tracking-widest">灵魂重构</h1>
@@ -232,8 +248,9 @@ const VerificationModal: React.FC<VerificationModalProps> = ({ onComplete, lang 
                     <p>* 本平台为社区互助系统，非雇佣平台，不经手任何资金，不提供收入担保。</p>
                 </div>
             </div>
+           </div>
 
-            <div className="mt-auto">
+            <div className="shrink-0 pt-4">
                 <button
                     disabled={!name}
                     onClick={() => setStep(1)}
@@ -247,16 +264,29 @@ const VerificationModal: React.FC<VerificationModalProps> = ({ onComplete, lang 
 
         {/* STEP 1: 抽相貌 */}
         {step === 1 && (
-            <div className="flex-1 flex flex-col p-6 animate-in slide-in-from-right duration-500">
-                <div className="mt-4 mb-4 text-center">
-                    <div className="w-16 h-16 mx-auto bg-slate-800/80 backdrop-blur rounded-2xl flex items-center justify-center border border-amber-500/30 mb-4 shadow-[0_0_20px_rgba(245,158,11,0.2)]">
+            <div className="flex-1 min-h-0 flex flex-col p-6 animate-in slide-in-from-right duration-500">
+              <div className={`${stepBody} flex flex-col`}>
+                <div className="mt-4 mb-4 text-center shrink-0">
+                    {/* 矮视口隐藏装饰图标：这一步的主角是立绘，每省下 80 px 都还给卡片 */}
+                    <div className="w-16 h-16 mx-auto bg-slate-800/80 backdrop-blur rounded-2xl flex items-center justify-center border border-amber-500/30 mb-4 shadow-[0_0_20px_rgba(245,158,11,0.2)] [@media(max-height:820px)]:hidden">
                         <Dices className="w-8 h-8 text-amber-500" />
                     </div>
                     <h1 className="text-3xl font-['Cinzel'] font-bold text-white tracking-widest">转生抽选</h1>
                     <p className="text-xs text-slate-400 mt-2">你无法选择转生成什么，但可以再赌一次</p>
                 </div>
 
-                <div className={`relative w-full aspect-[3/4] bg-slate-900 rounded-2xl overflow-hidden border-2 border-amber-500/40 shadow-2xl mb-4 transition-all duration-300 ${isRolling ? 'opacity-40 scale-95' : 'opacity-100 scale-100'}`}>
+                {/*
+                  立绘槽。原先卡片是 w-full aspect-[3/4]：列宽 400 px 时固定 533 px 高，不随视口高度变化，
+                  1366×657、1440×789 这类常见的笔记本内容区里主按钮整个落在屏幕外（QA-R1-01）。
+                  现在槽的基准高度就是原来的自然高度（列宽 × 4/3），只收缩不放大（flex: 0 1）；
+                  卡片高度跟着槽走、宽度按 3:4 反推，所以收缩时仍是同一比例的竖卡，不会被压扁。
+                  下限 14rem 保证底部的种族名与说明不被裁掉，再矮就交给外层滚动兜底。
+                */}
+                <div className="mb-4 min-h-[14rem]" style={{ flex: '0 1 calc((min(100vw, 28rem) - 3rem) * 4 / 3)' }}>
+                  <div
+                    data-testid="awaken-portrait-card"
+                    className={`relative h-full max-w-full aspect-[3/4] mx-auto bg-slate-900 rounded-2xl overflow-hidden border-2 border-amber-500/40 shadow-2xl transition-all duration-300 ${isRolling ? 'opacity-40 scale-95' : 'opacity-100 scale-100'}`}
+                  >
                     <Portrait roll={roll} missing={artMissing} onMissing={markArtMissing} className="w-full h-full" />
 
                     <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-transparent pointer-events-none"></div>
@@ -270,18 +300,20 @@ const VerificationModal: React.FC<VerificationModalProps> = ({ onComplete, lang 
                         </h3>
                         <p className="text-xs text-slate-300 leading-relaxed">{raceInfo.desc}</p>
                     </div>
+                  </div>
                 </div>
 
                 <button
                     onClick={reroll}
                     disabled={isRolling}
-                    className="w-full mb-3 bg-slate-900/80 border border-slate-700 hover:border-amber-500/50 text-slate-300 font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50"
+                    className="w-full shrink-0 bg-slate-900/80 border border-slate-700 hover:border-amber-500/50 text-slate-300 font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50"
                 >
                     <Dices className={`w-4 h-4 ${isRolling ? 'animate-spin' : ''}`} />
                     重新转生
                 </button>
+              </div>
 
-                <div className="mt-auto">
+                <div className="shrink-0 pt-3">
                     <button
                         onClick={() => setStep(2)}
                         className="w-full bg-amber-600 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg"
@@ -358,14 +390,17 @@ const VerificationModal: React.FC<VerificationModalProps> = ({ onComplete, lang 
 
         {/* STEP 3: 确认 */}
         {step === 3 && profession && (
-          <div className="flex-1 flex flex-col h-full animate-in slide-in-from-right duration-500 bg-slate-950/90 backdrop-blur-md p-6">
-             <div className="pt-6 mb-4 text-center z-10">
+          // 原先这里多一个 h-full：flex 子项的最小高度取「指定高度」与内容高度的较小者，
+          // h-full 让它最少有一整屏高，再叠在顶栏下面，1280×633 下主按钮被裁掉 2 px（QA-R1-01）
+          <div className="flex-1 min-h-0 flex flex-col animate-in slide-in-from-right duration-500 bg-slate-950/90 backdrop-blur-md p-6">
+           <div className={`${stepBody} flex flex-col`}>
+             <div className="pt-6 mb-4 text-center z-10 shrink-0">
                  <h2 className="text-2xl font-['Cinzel'] font-bold text-white tracking-widest mb-1">转生鉴定书</h2>
                  <p className="text-[10px] text-amber-500 font-mono tracking-widest uppercase">SOUL RECORD</p>
              </div>
 
              <div className="flex-1 flex flex-col items-center justify-center">
-                 <div className="relative w-full max-w-sm rounded-3xl overflow-hidden border-2 border-amber-500 shadow-[0_0_50px_rgba(245,158,11,0.4)] bg-black">
+                 <div data-testid="awaken-confirm-card" className="relative w-full max-w-sm rounded-3xl overflow-hidden border-2 border-amber-500 shadow-[0_0_50px_rgba(245,158,11,0.4)] bg-black">
                     <Portrait roll={roll} missing={artMissing} onMissing={markArtMissing} className="w-full h-80" />
 
                     <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-transparent"></div>
@@ -383,7 +418,8 @@ const VerificationModal: React.FC<VerificationModalProps> = ({ onComplete, lang 
                         <div className="bg-slate-900/80 backdrop-blur p-3 rounded-xl border border-slate-700 text-xs text-slate-300 leading-relaxed mb-3">
                             {PROFESSION_CONFIG[profession].desc}
                         </div>
-                        <div className="flex items-center gap-2 text-[10px] text-emerald-400 font-mono bg-emerald-950/50 px-2 py-1 rounded w-fit border border-emerald-500/30">
+                        {/* emerald-950 不在重映射色板里，会落回 Tailwind 默认的饱和墨绿；900 才是色板里的铜绿暗面 */}
+                        <div className="flex items-center gap-2 text-[10px] text-emerald-400 font-mono bg-emerald-900/50 px-2 py-1 rounded w-fit border border-emerald-500/30">
                             <span>▲</span> {raceInfo.buff}
                         </div>
                     </div>
@@ -393,11 +429,17 @@ const VerificationModal: React.FC<VerificationModalProps> = ({ onComplete, lang 
                      * 相貌由转生抽选决定，职业由你自己选择
                  </div>
              </div>
+           </div>
 
-             <div className="mt-auto pt-6">
+             <div className="shrink-0 pt-6">
+                {/*
+                  觉醒的最后一步，保留「渐变 + 光晕」的仪式感，但换回金色系（QA-R1-06）。
+                  原先的 to-blue-600 不在重映射过的色板里，渲染出来是饱和蓝；
+                  rgba(147,51,234) 的紫色光晕是任意值，色板管不到——两者都是美术方向明令禁止的霓虹蓝紫。
+                */}
                 <button
                     onClick={() => setStep(4)}
-                    className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white font-bold py-4 rounded-xl shadow-[0_0_25px_rgba(147,51,234,0.4)] transform active:scale-95 transition-all font-['Cinzel'] tracking-[0.2em] flex items-center justify-center gap-2 border border-purple-400/30"
+                    className="w-full bg-gradient-to-r from-amber-700 to-amber-500 hover:from-amber-600 hover:to-amber-400 text-white font-bold py-4 rounded-xl shadow-[0_0_25px_rgba(201,169,97,0.35)] transform active:scale-95 transition-all font-['Cinzel'] tracking-[0.2em] flex items-center justify-center gap-2 border border-amber-300/30"
                 >
                     <Sparkles className="w-4 h-4" />
                     <span>加入互助社区</span>
