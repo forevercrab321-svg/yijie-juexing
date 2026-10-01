@@ -12,81 +12,7 @@
     <meta name="format-detection" content="telephone=no" />
     
     <title>转生·艾塞尔加德公会</title>
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-      /*
-        重定义调色板，而不是逐个改组件的类名。
-        全站有几十处 bg-slate-900 / text-cyan-400 / border-indigo-500，
-        改类名既慢又容易漏；把色板本身换掉，一次生效且不会有漏网的。
-
-        原则（取自旷野之息的 UI）：
-          · 结构色只有一套暖石板，不用纯黑——纯黑会让画面发死
-          · 点缀色只有金，其余全部收敛过去
-          · 功能色只保留两个：铜绿(生机/成功)、暖橙(注意/紧急)
-
-        代价是语义漂移：代码里写 cyan，渲染出来是铜绿。
-        这是刻意的取舍——先拿到统一的视觉，语义等美术定稿后再统一重命名。
-      */
-      tailwind.config = {
-        theme: {
-          extend: {
-            colors: {
-              // 石板：全站结构色
-              slate: {
-                50:  '#f7f2e8', 100: '#ede4d3', 200: '#d4c9b4', 300: '#b8ab94',
-                400: '#9c907a', 500: '#7d735f', 600: '#574c3e', 700: '#3d352b',
-                800: '#2e2820', 900: '#24201b', 950: '#1c1815',
-              },
-              // 金：唯一的主点缀
-              amber: {
-                50:  '#fbf6e9', 100: '#f4ebd4', 200: '#e8cf94', 300: '#d9bc79',
-                400: '#c9a961', 500: '#b8964e', 600: '#9a7c3e', 700: '#7a6131',
-                800: '#5c4926', 900: '#3f321a', 950: '#241c0f',
-              },
-              yellow: {
-                300: '#e8cf94', 400: '#c9a961', 500: '#b8964e', 600: '#9a7c3e',
-              },
-              // 铜绿：生机 / 成功。emerald 与 cyan 收敛到同一系，避免画面出现两种绿
-              emerald: {
-                100: '#d9e8e0', 200: '#b4d2c4', 300: '#8fbca8', 400: '#6d9b87',
-                500: '#578270', 600: '#44685a', 700: '#354f45', 800: '#28372f', 900: '#1c2621',
-              },
-              cyan: {
-                100: '#dae7e9', 200: '#b6d0d4', 300: '#93b8bf', 400: '#7ba2ab',
-                500: '#628691', 600: '#4d6b74', 700: '#3b5158', 800: '#2b3a3f', 900: '#1e282c',
-              },
-              // 靛蓝与紫：全部并入石板+金，不再作为独立色相出现
-              indigo: {
-                100: '#e4dcc9', 200: '#cfc3a8', 300: '#b3a586', 400: '#95886b',
-                500: '#786c53', 600: '#5c5240', 700: '#443c2e', 800: '#302a20', 900: '#221d16',
-              },
-              purple: {
-                200: '#dcc9a8', 300: '#c2ab85', 400: '#a68e69', 500: '#8a7452',
-                600: '#6b5940', 700: '#4e4030', 800: '#352b20', 900: '#241d15',
-              },
-              violet: { 400: '#a68e69', 500: '#8a7452', 600: '#6b5940' },
-              // 暖橙：注意 / 紧急。取代刺目的正红
-              red: {
-                100: '#f2ddce', 200: '#e5bfa4', 300: '#d79c74', 400: '#c87a45',
-                500: '#ad6236', 600: '#8c4d29', 700: '#6b3b20', 800: '#4a2a17', 900: '#2e1b0f',
-                950: '#1d1109',
-              },
-              sky: { 400: '#7ba2ab', 500: '#628691', 600: '#4d6b74' },
-            },
-            fontFamily: {
-              sans: ['Noto Serif SC', 'Inter', 'serif'],
-              serif: ['Noto Serif SC', 'serif'],
-              mono: ['ui-monospace', 'SFMono-Regular', 'monospace'],
-            },
-            transitionTimingFunction: {
-              DEFAULT: 'cubic-bezier(0.16, 1, 0.3, 1)',
-              soft: 'cubic-bezier(0.16, 1, 0.3, 1)',
-            },
-          },
-        },
-      };
-    </script>
+    <!-- Tailwind 已改为构建时编译，入口见 index.css 与 tailwind.config.js -->
     
     <!--
       字体：Cinzel 承担西文标题的古典感，Noto Serif SC 让中文也是衬线。
@@ -95,11 +21,6 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Noto+Serif+SC:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
-    
-    <!-- Leaflet CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-     crossorigin=""/>
 
     <style>
       :root {

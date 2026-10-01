@@ -1,0 +1,4 @@
+/* Tailwind 入口。构建时编译，取代 index.html 里的 Play CDN。 */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

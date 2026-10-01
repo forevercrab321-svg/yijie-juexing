@@ -3,6 +3,8 @@ import React, { useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline, CircleMarker } from 'react-leaflet';
 import { DivIcon, LatLngBounds } from 'leaflet';
 import { Quest } from '../types';
+// 原先从 unpkg 加载。leaflet 本来就是 npm 依赖，样式随组件打包，不再依赖第三方 CDN
+import 'leaflet/dist/leaflet.css';
 
 interface MapBoardProps {
   quests: Quest[];
