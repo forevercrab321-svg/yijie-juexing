@@ -1,20 +1,24 @@
 # 异界觉醒 · 转生·艾塞尔加德公会
 
-把纽约真实地图套上异世界设定的社区互助原型：实名觉醒 → 面部解析生成专属形象 → 在地图上接取悬赏 → 到现场提交证明。公会长「艾琳娜」由 MiniMax T2A 提供语音。
+把纽约真实地图套上异世界设定的社区互助原型：觉醒建档 → 在 3D 风格化纽约里接取委托 → 真实 GPS 到场 → 提交证明结算。公会长「艾琳娜」是可对话的 AI NPC（MiniMax 对话 + 语音），只管委托。
+
+本版本（3D 世界地图垂直切片）的构建、包体、已知问题与测试指引见 [docs/studio/RELEASE.md](docs/studio/RELEASE.md)。
 
 ## 架构
 
 ```
 浏览器
-  ├── React 19 + Vite + Leaflet
+  ├── React 19 + Vite 6 + Tailwind（构建时编译）
+  │     ├── components/world/scene/   Three.js 3D 世界（React.lazy 独立分包，three 只在这里）
+  │     └── components/MapBoard.tsx   Leaflet 2D 回退（同样按需加载）
   └── services/api.ts ──POST /api/*──┐
                                       │  （浏览器侧不持有任何 API key）
-                          ┌───────────┴───────────┐
-                          │                       │
-              vite.config.ts dev 中间件      functions/api/*.ts
-                    （本地开发）           （Cloudflare Pages Functions）
-                          │                       │
-                          └────── server/ai.ts ───┘
+                ┌─────────────────────┼─────────────────────┐
+                │                     │                     │
+    vite.config.ts dev 中间件   functions/api/*.ts        api/*.ts
+          （本地开发）        （Cloudflare Pages      （Vercel Functions）
+                │               Functions）                │
+                └──────── server/ai.ts · server/chat.ts ───┘
                                 （唯一持有 MINIMAX_API_KEY 的地方）
                                           │
                           /v1/t2a_v2          chat completions
@@ -27,7 +31,7 @@
 
 本地与生产共用 `server/ai.ts` 里的同一份 handler，不会出现"本地能跑、线上行为不一样"。
 
-所有 AI 调用统一走 MiniMax，计入同一份 token plan。美术风格统一为 **2D 插画**。
+所有 AI 调用统一走 MiniMax，计入同一份 token plan。立绘与界面是 **2D 插画**，世界地图是**程序化生成的 3D 风格化纽约**（大地色系，参照《旷野之息》），没有任何外部 3D 资产或贴图请求。
 
 ## 本地运行
 
@@ -46,11 +50,11 @@
 
    > **不要**给任何变量加 `VITE_` 前缀，也不要在 `vite.config.ts` 里用 `define` 注入它们——那会把密钥明文编译进前端 bundle。
 
-3. 生成静态资产（**首次必须执行一次**）
+3. 生成静态资产（可选——仓库已带立绘、横幅与艾琳娜的固定语音，直接跑不需要这一步）
    ```bash
    npm run assets
    ```
-   用 MiniMax 生成 8 张静态图与艾琳娜的固定语音，输出到 `public/assets/` 与 `public/audio/elena/`。
+   用 MiniMax 重新生成静态图与艾琳娜的固定语音，输出到 `public/assets/` 与 `public/audio/elena/`。
    已存在的文件会被跳过，不会重复烧额度；要重做加 `-- --force`。
 
 4. 启动
@@ -64,7 +68,7 @@
 | 变量 | 必填 | 说明 |
 |---|---|---|
 | `MINIMAX_API_KEY` | 是 | MiniMax API key。生产环境设为 Secret 类型。 |
-| `ALLOWED_ORIGINS` | 生产必填 | 逗号分隔的正式域名。**留空会放行 localhost**。 |
+| `ALLOWED_ORIGINS` | 生产必填 | 逗号分隔的正式域名，**精确匹配 origin**（含协议，不支持通配符）。**留空会放行 localhost**。预览环境（Vercel Preview、Pages 的分支预览）也要把预览域名加进来，否则艾琳娜会收到 `ORIGIN_DENIED`。 |
 | `MINIMAX_GROUP_ID` | 否 | Chat Completions 不需要；T2A 在部分区域要求。配置后会作为查询参数附加到 `/v1/t2a_v2`。 |
 | `MINIMAX_BASE_URL` | 否 | 默认全球站 `https://api.minimax.io`（美国/海外 token plan 用这个）。美西低延迟节点 `https://api-uw.minimax.io`，中国大陆账号 `https://api.minimaxi.chat`。**区域端点只影响延迟，不构成数据驻留承诺**，见 PRIVACY.md 4.3。 |
 | `MINIMAX_TTS_VOICE_ID` | 否 | 默认 `Chinese (Mandarin)_Lyrical_Voice`。换音色不需要改代码。 |
@@ -72,23 +76,47 @@
 | `MINIMAX_CHAT_MODEL` | 否 | 对话模型，默认 `MiniMax-M2.7`。**必须与账号实际开通的模型对上。** |
 | `MINIMAX_CHAT_PATH` | 否 | 默认 `/v1/text/chatcompletion_v2`。收到 `AI_CHAT_PATH_INVALID` 就换 `/v1/chat/completions`。 |
 
+## 3D 世界与 2D 回退
+
+主界面默认是 Three.js（r180）渲染的 3D 纽约：玩家的真实 GPS 位置是世界里的角色，每个委托是立在真实坐标上的光柱，相机可拖动旋转、俯仰、缩放。
+
+- **分包**：`components/world/scene/**` 是唯一允许 `import 'three'` 的地方，App 用 `React.lazy` 加载它。同意页、觉醒页不会请求这个分包；`dist/index.html` 里也没有它的 `<script>` 或 `modulepreload`。
+- **WebGL2 预检**：three r180 只支持 WebGL2。挂载前先探测，不可用就直接进 2D，3D 分包根本不会下载。
+- **回退**：运行中初始化失败、上下文丢失、分包加载失败都会调用 `onFallback(reason)`，App 切回 Leaflet 的 `MapBoard`，并在世界控件旁写明原因。上下文丢失这类瞬时故障允许再点一次「3D」重试。
+- **手动切换**：右下世界控件的「2D / 3D」按钮。选择不跨刷新记忆。
+- **接取只有一条路**：点光柱只打开聚焦卡片，卡片上的「承接契约」走 `App.tsx` 的 `handleAccept`，由艾琳娜确认（「契约签署完成」）。契约终端、公会紧急委托、艾琳娜的工具接取都走同一条路径。
+- **画质档位**：手机或 ≤ 4 核判为低档（DPR ≤ 1.5、阴影 1024、30 fps 上限），桌面高档（DPR ≤ 2、阴影 2048、MSAA）。两档都不开后处理。URL 加 `?tier=high|low` 可强制。
+- **调试钩子**：只在 URL 带 `?debug=1` 时挂载，生产默认关闭。`window.render_game_to_text()` 返回 JSON 字符串（相机、光柱与玩家的屏幕坐标、draw call / 三角形 / 纹理读数），`window.__world` 提供 `tapBeacon(id)`、`focusQuest(id)`、`setHour(h)`、`recenter()`、`stats()`。`WorldMap` 卸载（切 2D）时随之移除。
+
+2D 地图的底图瓦片来自 Carto CDN，3D 世界不请求任何瓦片或外部资产。
+
 ## 类型检查与构建
 
 ```bash
 npm run typecheck
-```
-
-```bash
 npm run build
+npm run preview   # 在 http://localhost:4173 预览 dist/，发布前测的应该是它而不是 dev server
 ```
 
-## 部署（Cloudflare Pages）
+Tailwind 已改为**构建时编译**（`tailwind.config.js` + `postcss.config.js`，入口 `index.css`），不再依赖 Play CDN。构建产物分三块：入口 chunk（React、界面、成长逻辑）、`WorldMap-*.js`（three + 场景，约 180 KB gzip，按需）、`MapBoard-*.js`（Leaflet，约 49 KB gzip，按需）。Rollup 对 `WorldMap` chunk 的「大于 500 kB」提示是预期内的——它不在首屏加载。各 chunk 的实测体积与预算见 [docs/studio/RELEASE.md](docs/studio/RELEASE.md)。
 
-构建命令 `npm run build`，输出目录 `dist`，`functions/` 会被自动识别为 Pages Functions。在 Pages 项目设置中配置上表的环境变量。
+## 部署
+
+两个平台共用同一份 `server/` handler，只有适配层不同；环境变量都是上表那几个。
+
+### Cloudflare Pages
+
+构建命令 `npm run build`，输出目录 `dist`，`functions/` 会被自动识别为 Pages Functions（`functions/api/chat.ts`、`functions/api/tts.ts`）。在 Pages 项目设置中配置环境变量，并把 `NODE_VERSION` 设为 `22`。
 
 可选：绑定一个 KV 命名空间到 `RATE_LIMIT_KV`，让限流跨实例生效。未绑定时退化为单实例内存计数，多实例部署下会漏算。
 
-换用 Vercel / Netlify 时，只需把 `functions/api/*.ts` 的三行适配层重写为对应平台的签名，`server/` 目录无需改动。
+### Vercel
+
+仓库根目录的 `vercel.json` 已声明 `framework: vite`、`buildCommand: npm run build`、`outputDirectory: dist`；`api/chat.ts` 与 `api/tts.ts` 是 Vercel Functions 适配层（Web 标准签名 `export async function POST(request: Request)`），导入 GitHub 仓库即可部署，不需要额外配置。
+
+- 在 Project Settings → Environment Variables 里配置 `MINIMAX_API_KEY`（Sensitive）与 `ALLOWED_ORIGINS`，**Production 与 Preview 两个环境都要配**：预览部署没有 key 时艾琳娜会提示「还没配置 MINIMAX_API_KEY」；没有把预览域名写进 `ALLOWED_ORIGINS` 时她会收到 `ORIGIN_DENIED`。预览域名建议用固定的分支别名（`https://<project>-git-<branch>-<team>.vercel.app`）而不是每次都变的部署 URL。
+- Vercel 没有 KV 绑定，限流固定为单实例内存计数。
+- `functions/` 目录在 Vercel 上会被忽略，`api/` 在 Cloudflare 上不会进入 `dist`，两边互不干扰。
 
 ## 接入 MiniMax 时的三个坑
 
@@ -140,21 +168,30 @@ npm run build
 
 ## 本地档案
 
-用户的代号、等级、金币与**专属卡通形象**存在 `localStorage`（`aethelgard:session:v1`）。形象只生成一次就固定下来 —— 既保证每次打开都是同一个自己，也不会重复烧额度。
+用户的代号、等级、魔素（经验）、金币、信任值、公会贡献、已完成委托与**专属卡通形象**存在 `localStorage`（`aethelgard:session:v1`）。形象只生成一次就固定下来 —— 既保证每次打开都是同一个自己，也不会重复烧额度。成长数值由 `lib/progression.ts` 的 `settleQuest()` 结算，按委托自己的 `rewardGold` / `trustPoints` 发放；旧档案会在读取时由 `normalizeProgress()` 补齐新字段。
 
 清除入口在「个人档案 → 清除本设备数据」，这是用户撤回同意的出口，不要移除或隐藏。
 
 ## 已知问题
 
+完整清单（含 QA 未关闭的缺陷、沙箱测不到的项）见 [docs/studio/RELEASE.md](docs/studio/RELEASE.md)。
+
 - mock 数据里的配图（任务卡片、公会横幅、动态流）仍引用 Unsplash。它们属于示例数据，接真实数据时会一并替换。
+- 艾琳娜的立绘（`public/assets/elena/*.jpg`）尚未产出，界面里是占位。
+- 进行中的委托只在内存里，刷新页面后要重新接取（成长与已完成记录会保留）。
 
 ## 目录
 
 ```
-server/          平台无关的服务端 handler（唯一接触 API key 的地方）
-lib/agent/       艾琳娜的工具定义、工具执行、对话状态、本地语音插槽
-functions/api/   Cloudflare Pages Functions 适配层
-services/        前端 API 客户端
-lib/             证件号处理、地理计算
-components/      UI 组件
+server/                  平台无关的服务端 handler（唯一接触 API key 的地方）
+functions/api/           Cloudflare Pages Functions 适配层
+api/                     Vercel Functions 适配层
+services/                前端 API 客户端
+lib/agent/               艾琳娜的工具定义、工具执行、对话状态、本地语音插槽
+lib/progression.ts       等级曲线、结算（settleQuest）、接取门槛
+lib/                     证件号处理、地理计算、本地档案
+components/world/scene/  Three.js 3D 世界（唯一允许 import three 的地方；worldEvents.ts 零依赖）
+components/world/ui/     世界界面：TopHud、WorldControls、QuestFocusCard、SettlementToast
+components/              其余 UI 组件（MapBoard 为 2D 回退）
+docs/studio/             工作室流程、简报、交接与发布说明
 ```
