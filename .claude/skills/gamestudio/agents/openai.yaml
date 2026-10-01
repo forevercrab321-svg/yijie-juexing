@@ -1,0 +1,4 @@
+interface:
+  display_name: "Game Studio"
+  short_description: "End-to-end game design, production, QA, and release"
+  default_prompt: "Use $gamestudio to take this game task from player outcome through implementation, verification, and handoff."
