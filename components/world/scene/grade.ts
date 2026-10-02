@@ -1,52 +1,43 @@
 /**
- * 全局调色：把渲染器的色调映射换成「Neutral + 分离色调 + 亮度 S 曲线」。
+ * 全局色调映射：「近似直通 + 柔和高光肩」。
  *
- * 为什么写进色调映射而不是做后处理：three 的每个材质（含光柱、天空、特效这些 ShaderMaterial）在片元末尾
- * 都会调用 toneMapping()。把调色写进 CustomToneMapping，等于一个零 draw call、零渲染目标、手机也能开的
- * 「调色 pass」——简报 7.1 要求手机 0 个后处理 pass，3D 分包也只剩二十来 KB 余量，EffectComposer 进不来。
+ * 为什么不直接用 NeutralToneMapping（指南 5.2 的起点）：Neutral 从 0.76 起就开始压高光，
+ * 而这一版的色板几乎全是接近白的粉彩（奶油墙 #FFF3DE 的 R 通道就是 1.0）——Neutral 下奶油墙会掉到 #F0E5D1 一带，
+ * 「受光面取色 ≈ 色板（每通道误差 ≤ 10/255）」这条验收永远过不了。指南也允许「直接退回 Neutral 或只做轻调色」，
+ * 这里取更直接的一种：0.86 以下原样输出（色板颜色进去什么出来什么），只有峰值通道超过 0.86 时按 Neutral 同款的
+ * 有理函数平滑压到 1，夜里的窗灯、徽章光晕、升级曝光闪不会硬切成一块死白。按峰值等比缩放，色相不变。
  *
- * 调色方向（CLAUDE.md：低饱和、有色阴影、旷野之息）：
- *  - 冷影暖光：暗部往石板蓝偏、亮部往暖米偏。只改色相，按亮度加权的增益约等于 1，不改明暗。
- *  - 对比只做在亮度上：中间调更有体积，但各通道比例不变——饱和度不会被 S 曲线顺手抬高。
- *  - 信号色保护：高饱和像素（光柱的金与赭、界面同源的 token 色）少调甚至不调，token 在屏幕上仍是设计稿的颜色。
- *
- * 注意：three 在色调映射之后才混雾（fog_fragment 在 colorspace_fragment 之后），雾色不经过这里，要按显示空间直接给。
+ * 写进色调映射而不是做后处理：three 的每个材质（含 ShaderMaterial）在片元末尾都会调用 toneMapping()，
+ * 等于一个零 draw call、零渲染目标、手机也能开的调色 pass（简报 7.1：手机 0 个后处理 pass）。
+ * 注意：three 在色调映射之后才混雾，雾色要按显示空间直接给。
  */
 import * as THREE from 'three';
 
-const MARK = '/* yj-grade-v1 */';
+const MARK = '/* yj-cute-tone-v1 */';
 const PLACEHOLDER = 'vec3 CustomToneMapping( vec3 color ) { return color; }';
 
-/*
- * 着色器里的步骤（注释写在这里而不是 GLSL 里：模板字符串里的中文会原样打进 3D 分包）：
- *  1. Neutral 负责曝光与高光压缩——它最大程度保留原色，是 M1 选定的基线。
- *  2. 在近似感知空间（γ≈2）里分档：亮暗的划分与 S 曲线都更贴近肉眼。sat 高的像素（信号色）k 变小、少调。
- *  3. 冷影暖光：两组系数按亮度加权（0.2126 / 0.7152 / 0.0722）都约为 1，只改色相不改明暗。
- *  4. 亮度 S 曲线：只缩放亮度，色相与饱和度不动。暗部（趾部）不压——旷野之息的阴影是透气的冷色，不是死黑。
- */
 const GRADE_GLSL = /* glsl */ `${MARK}
 vec3 CustomToneMapping( vec3 color ) {
-	vec3 c = NeutralToneMapping( color );
-	vec3 p = sqrt( max( c, vec3( 0.0 ) ) );
-	float l = dot( p, vec3( 0.2126, 0.7152, 0.0722 ) );
-	float mx = max( p.r, max( p.g, p.b ) );
-	float sat = ( mx - min( p.r, min( p.g, p.b ) ) ) / max( mx, 1e-4 );
-	float k = 1.0 - 0.75 * smoothstep( 0.42, 0.8, sat );
-	vec3 tint = mix( vec3( 0.94, 0.995, 1.10 ), vec3( 1.035, 1.0, 0.935 ), smoothstep( 0.2, 0.62, l ) );
-	p *= mix( vec3( 1.0 ), tint, k );
-	float l2 = l + ( l * l * ( 3.0 - 2.0 * l ) - l ) * 0.22 * smoothstep( 0.1, 0.4, l );
-	p *= l2 / max( l, 1e-4 );
-	return clamp( p * p, 0.0, 1.0 );
+	color = max( color * toneMappingExposure, vec3( 0.0 ) );
+	float peak = max( color.r, max( color.g, color.b ) );
+	const float K = 0.86;
+	if ( peak <= K ) return color;
+	float d = 1.0 - K;
+	float np = 1.0 - d * d / ( peak + d - K );
+	return color * ( np / peak );
 }`;
+
+// 旧版（大地色方向）的调色标记：同一页面里 2D ↔ 3D 来回切时可能已经装过，要先认出来
+const OLD_MARK = '/* yj-grade-v1 */';
 
 /** 只需调用一次；重复挂载 3D 世界（2D ↔ 3D 来回切）时是空操作 */
 export function installGrade(): void {
   const chunk = THREE.ShaderChunk.tonemapping_pars_fragment;
-  if (chunk.includes(MARK) || !chunk.includes(PLACEHOLDER)) return;
+  if (chunk.includes(MARK) || chunk.includes(OLD_MARK) || !chunk.includes(PLACEHOLDER)) return;
   THREE.ShaderChunk.tonemapping_pars_fragment = chunk.replace(PLACEHOLDER, GRADE_GLSL);
 }
 
-/** 占位符没找到（three 升级改了写法）时退回 Neutral，画面至少与 M1 一致 */
+/** 占位符没找到（three 升级改了写法）时退回 Neutral：画面会略灰，但不会坏 */
 export function gradeToneMapping(): THREE.ToneMapping {
   return THREE.ShaderChunk.tonemapping_pars_fragment.includes(MARK) ? THREE.CustomToneMapping : THREE.NeutralToneMapping;
 }

@@ -277,7 +277,7 @@ export class LandIndex {
 
   /**
    * 站立面：陆地优先，其次桥面，否则是水面。
-   * 委托若落在桥面上（例如布鲁克林大桥中段），光柱就立在桥面上——那是真实可走到的地方。
+   * 委托若落在桥面上（例如布鲁克林大桥中段），徽章就立在桥面上——那是真实可走到的地方。
    */
   surfaceAt(p: XZ): { kind: 'land' | 'deck' | 'water'; x: number; z: number; y: number } {
     if (this.isLand(p.x, p.z)) {

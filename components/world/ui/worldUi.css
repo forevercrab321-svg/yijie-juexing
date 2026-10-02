@@ -1,149 +1,168 @@
 /*
- * 世界层界面共用样式：TopHud / WorldControls / QuestFocusCard / SettlementToast。
+ * 世界界面共用样式：TopHud / WorldControls / QuestFocusCard / SettlementToast / ActiveQuestHUD / ProofSubmission。
+ * 视觉依据 docs/studio/style-cute.md；颜色、圆角、阴影、动效全部引用 index.html :root 的 --cute-* / --quest-* token，
+ * 这里不出现裸 hex（白色除外）。
  *
- * 只写 Tailwind 表达不了、或会生成一次性任意值规则的部分：safe-area 与 dvh 定位、断点、渐变、关键帧、
- * 减少动态效果。布局与字号一律用基础 CSS 里已经存在的 Tailwind 工具类——它们已经付过费，
- * 再写一遍就是白白占 CSS 预算（入口 CSS ≤18KB gzip，基线 15.5KB，余量只有 2.5KB）。
- * 实测见 docs/studio/handoff/ui-designer.md。颜色只引用 index.html :root 的 token 与 tailwind 色板。
+ * 分工：排版、间距、字号这类静态属性写成组件里的 Tailwind 工具类（别处也在用，打包时只算一次）；
+ * 这里只留工具类表达不了的：safe-area 与 dvh 定位、按色调变量（--tone-*）取色、伪元素、状态、断点与关键帧。
+ * 入口 CSS 预算 80 KB（指南 9.2），这份文件压缩后控制在 9 KB 以内。
+ *
+ * 层叠顺序：index.tsx 先 import App、后 import index.css，所以这份文件在打包结果里排在 index.css **之前**——
+ * 单类选择器对上 .cute-* 原语会输。要覆盖原语的属性，要么用工具类（工具类排在最后），要么写「原语类 + 本组件类」的复合选择器。
  */
 
-/* ── 通用 ── */
-/* 面板沿用 rune-panel 的石板材质，但去掉 backdrop-filter：底色约 95% 不透明，模糊几乎看不见，
-   叠在逐帧重绘的 WebGL 画布上却要逐帧重算——伴随地图最怕这种白白耗电的 GPU 开销。 */
-.wui-flat.rune-panel { -webkit-backdrop-filter: none; backdrop-filter: none; }
-/* 焦点环：键盘玩家只能靠它知道自己在哪；默认蓝描边与暖金界面割裂，统一换成亮金 */
-.wui-btn { transition: 160ms var(--ease-out-soft); }
-.wui-btn:focus-visible { outline: 2px solid var(--gold-bright); outline-offset: 2px; }
-.wui-btn:disabled { cursor: not-allowed; }
-.wui-btn:active:not(:disabled) { transform: scale(.97); }
-.wui-tnum { font-variant-numeric: tabular-nums; }
+.wui-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .wui-wrap { overflow-wrap: anywhere; }
-.wui-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+/* 按所在色调取浅底与深字：原因条、奖励格、圆章共用 */
+.wui-tint { background: var(--tone-50); color: var(--tone-600); }
+/* 迁移期兼容：App.tsx 里还没换皮的旧浮层（rune-panel）靠 wui-flat 关掉毛玻璃——画布每帧重绘，毛玻璃就要每帧重算模糊 */
+.wui-flat.rune-panel { -webkit-backdrop-filter: none; backdrop-filter: none; }
 
-/* ── TopHud ──
-   高度锁死 4rem：顶栏 1rem 内边距 + 4rem 正好止于 5rem，而 ActiveQuestHUD 与定位告知条从 5rem / 5.5rem 起、
-   在手机上横跨全宽。写成固定值，字体回退造成的行高差也撑不高它。
-   最大宽度给右侧 48px 按钮列留位：窄屏截断名字，而不是把按钮挤出屏幕。 */
-.wui-hud { height: 4rem; max-width: min(20rem, calc(100vw - 5.75rem - var(--sal) - var(--sar))); margin-left: var(--sal); padding: .375rem .75rem .375rem .375rem; border-radius: 1rem; text-align: left; }
-.wui-hud-g { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: .75rem; align-items: center; }
-.wui-hud-n { font-size: .9375rem; line-height: 1.25rem; }
-.wui-hud-r { font-size: .6875rem; line-height: .8125rem; letter-spacing: .08em; }
-/* 数值等宽并预留最小宽度：金币从 99 涨到 100 时整块不该左右跳 */
-.wui-hud-s { display: flex; align-items: center; justify-content: flex-end; gap: .25rem; font-size: .8125rem; line-height: .8125rem; font-weight: 600; }
-.wui-hud-s > span { min-width: 3ch; text-align: right; }
-.wui-hud-x { grid-column: 1 / -1; display: flex; align-items: center; gap: .5rem; margin-top: .1875rem; }
-.wui-lv { display: flex; align-items: baseline; gap: 1px; line-height: 1; color: var(--gold-bright); }
-.wui-lv > :first-child { font-size: .6875rem; color: var(--gold); }
-.wui-lv > :last-child { font-size: .875rem; }
-.wui-bar { position: relative; flex: 1; height: .375rem; border-radius: 9px; overflow: hidden; background: rgba(0, 0, 0, .5); box-shadow: inset 0 0 0 1px rgba(201, 169, 97, .28); }
+/* ── TopHud：高度锁死 4rem（顶栏 1rem 内边距 + 4rem 正好止于 5rem），最宽给右侧 48px 按钮列留位（指南 7.1） ── */
+.wui-hud { max-width: min(20rem, calc(100vw - 6rem - var(--sal) - var(--sar))); margin-left: var(--sal); touch-action: manipulation; transition: transform var(--cute-dur-fast) var(--cute-ease-spring); }
+.cute-panel-float.wui-hud:focus-visible { outline: none; box-shadow: var(--cute-shadow-float), var(--cute-focus-ring); }
+.cute-panel-float.wui-hud:active { transform: scale(.97); }
+.wui-lv { position: absolute; right: -6px; bottom: -5px; height: 20px; padding: 0 6px; border: 2px solid #fff; border-radius: 99px; background: var(--cute-sun-400); color: var(--cute-sun-ink); font-size: var(--cute-fs-cap); line-height: 16px; white-space: nowrap; box-shadow: var(--cute-shadow-1); }
+.wui-hud-g { grid-template-columns: minmax(0, 1fr) auto; }
+.wui-hud-s { grid-area: 1 / 2 / 3; line-height: 18px; }
+.wui-hud-s b { min-width: 3ch; text-align: right; }
+.cute-progress.wui-xp { grid-column: 1 / -1; height: 8px; margin-top: 5px; }
 /* 经验条在结算卡的经验落账那一拍才涨（--land2，feelTiming.ts）：奖励是从卡片「流进」顶栏的 */
-.wui-bar > span { transform-origin: left; background: linear-gradient(90deg, #9a7c3e, var(--gold) 55%, var(--gold-bright)); transition: transform 600ms var(--ease-out-soft) var(--land2, 0ms); }
-/* 四分刻度：像刻在石板上的槽，也让人估得出离升级还差多少 */
-.wui-bar::after { content: ''; position: absolute; inset: 0; background: repeating-linear-gradient(90deg, transparent 0 calc(25% - 1px), rgba(28, 24, 21, .75) 0 25%); }
-/* 等级在升级拍上亮（与世界的 celebrate 爆发同拍）；金币、信任在卡片上对应那一笔落账时跳一下 */
-.wui-lvup .wui-lv { animation: wui-lv 1.2s var(--ease-out-soft) var(--lvbeat, 0ms); }
-.wui-gain-g .wui-g { animation: wui-tick 460ms var(--ease-out-soft) var(--land0, 0ms); }
-.wui-gain-t .wui-t { animation: wui-tick 460ms var(--ease-out-soft) var(--land1, 0ms); }
+.wui-xp .cute-progress-fill { min-width: 8px; transition: width .6s var(--cute-ease-out) var(--land2, 0ms); }
+/* 等级角标在升级拍上蹦一下（与世界的 celebrate 爆发同拍）；金币、信任在卡片上对应那一笔落账时跳一下 */
+.wui-lvup .wui-lv { animation: wui-lv .52s var(--cute-ease-spring) var(--lvbeat, 0ms); }
+.wui-gain-g .wui-g { animation: wui-tick .42s var(--cute-ease-spring) var(--land0, 0ms); }
+.wui-gain-t .wui-t { animation: wui-tick .42s var(--cute-ease-spring) var(--land1, 0ms); }
 
-/* ── WorldControls ──
-   右侧竖排，按钮外沿与右上按钮列同在离右边 1rem 的竖线上，整体位于契约终端按钮之上。 */
-.wui-wc { position: fixed; z-index: 940; right: calc(.75rem + var(--sar)); bottom: calc(9.25rem + var(--sab)); pointer-events: none; transition: opacity 180ms, visibility 180ms; }
-/* 不可用原因常驻显示：禁用按钮收不到点击，手机上也没有悬停提示，只能把字直接摆出来 */
-.wui-note { position: absolute; right: calc(100% + .5rem); bottom: .25rem; width: max-content; max-width: min(13rem, calc(100vw - 6rem)); }
-.wui-note::before { content: ''; flex: none; width: .375rem; height: .375rem; margin-top: .3125rem; transform: rotate(45deg); background: var(--ember); }
-.wui-wcb:disabled { color: var(--parchment-mute); opacity: .6; }
-/* 窄屏下聚焦卡片是全宽底部抽屉，必然与竖排控件重叠：卡片打开期间让位 */
+/* ── WorldControls：右下竖排（指南 7.1）。DOM 顺序不变（Tab 仍是 切换 → 视角 → 回到我），视觉上 column-reverse 倒过来 ── */
+.wui-wc { position: fixed; z-index: 940; right: calc(16px + var(--sar)); bottom: calc(24px + var(--sab)); pointer-events: none; transition: opacity .18s, visibility .18s; }
+@media (min-width: 640px) { .wui-wc { right: calc(24px + var(--sar)); bottom: calc(32px + var(--sab)); } }
+.wui-rail { display: flex; flex-direction: column-reverse; gap: 10px; pointer-events: auto; }
+.cute-icon-btn.wui-mode { align-content: center; }
+.cute-icon-btn.wui-mode > svg { width: 18px; height: 18px; }
+.wui-mode > span { font-size: var(--cute-fs-cap); font-weight: 900; line-height: 13px; }
+/* 不可用时右上角一枚小问号＝「点我看原因」。原因不再常驻展开：常驻的提示框会盖住默认视角里的委托徽章（QA-R2-02） */
+.wui-q { border-color: #fff; background: var(--cute-sky-600); }
+/* 原因气泡：收起时换成 .wui-sr，只对读屏可见（它也是 aria-describedby 的目标）；点按后在对应按钮左侧弹出几秒 */
+.wui-note { position: absolute; right: calc(100% + 12px); width: max-content; max-width: min(15rem, calc(100vw - 7rem - var(--sal) - var(--sar))); margin: 0; padding: 10px 14px; border-radius: var(--cute-r-md); background: #fff; font-size: var(--cute-fs-sm); font-weight: 700; line-height: 20px; box-shadow: var(--cute-shadow-3); transform-origin: right; }
+.wui-note[data-for='toggle'] { bottom: 4px; }
+.wui-note[data-for='recenter'] { top: 4px; }
+.wui-note::after { content: ''; position: absolute; top: 50%; right: -6px; width: 12px; height: 12px; margin-top: -6px; transform: rotate(45deg); background: #fff; }
+.wui-note { animation: wui-pop .24s var(--cute-ease-spring) both; }
+/* 窄屏下聚焦卡片横跨全宽，必然与竖排控件重叠：卡片打开期间让位 */
 @media (max-width: 639.98px) { .wui-yield { opacity: 0; visibility: hidden; } }
-/* 横屏手机放不下竖排三个按钮（会撞上右上按钮列），改横排，提示移到上方 */
-@media (max-height: 560px) {
-  .wui-wc .wui-rail { flex-direction: row; }
-  .wui-wc .wui-note { right: 0; bottom: calc(100% + .5rem); }
-}
 
 /* ── QuestFocusCard ──
-   手机：底部抽屉。底边抬到艾琳娜入口（左下 48–104px）之上；顶边让开 TopHud 与定位告知条，
-   有进行中委托时再让开 ActiveQuestHUD（顶部 5rem 起约 93px）。
-   桌面：底部居中，高度封顶在视口中线附近——镜头会把被聚焦的光柱送到画面中央，卡片不能盖住它。
-   入场从底边向上长出来（scale + 底部原点）：动画途中包围盒只会比终态小，不会压到下方的艾琳娜入口。 */
-.wui-card { --edge: var(--gold); position: fixed; z-index: 1050; left: calc(1rem + var(--sal)); right: calc(1rem + var(--sar)); bottom: calc(7rem + var(--sab)); max-height: calc(100dvh - 15.75rem - var(--sat) - var(--sab)); transform-origin: 50% 100%; animation: wui-rise 220ms var(--ease-out-soft) both; }
-.wui-card.wui-hudgap { max-height: calc(100dvh - 18.5rem - var(--sat) - var(--sab)); }
+   手机：底部悬浮卡，底边抬到左下艾琳娜入口（24 + 56 = 80px）之上；顶边封顶在约 42% 视口高——聚焦时镜头把徽章送到画面 36% 高处
+   （指南 5.8），卡片不能盖住它。有进行中委托时顶边再让开 ActiveQuestHUD（约 12rem 止）。
+   桌面：底部居中 26rem，徽章在 45% 高处，卡片高度封顶在中线附近。
+   封顶再低也不低于 --floor：头部 + 原因 + 报酬 + 承接按钮必须放得下。横屏手机上宁可盖住一点进行中 HUD，也不能把承接按钮裁掉。 */
+.wui-card { --g: 14.75rem; --h: 10.25rem; --floor: min(17rem, calc(100dvh - 2.5rem)); z-index: 1050; left: calc(12px + var(--sal)); right: calc(12px + var(--sar)); bottom: calc(6rem + var(--sab)); max-height: max(min(calc(100dvh - var(--g) - var(--sat) - var(--sab)), max(calc(58dvh - 6rem - var(--sab)), 18rem)), var(--floor)); transform-origin: bottom; animation: wui-pop var(--cute-dur-pop) var(--cute-ease-spring) both; }
+.wui-hudgap { --g: 18.5rem; --h: 13rem; }
+/* 原因条几乎不参与收缩：正文先缩到 0，实在放不下（横屏）时原因条才缩、并在条内滚动，至少露出一行 */
+.wui-why { flex-shrink: .01; min-height: 2.75rem; overflow-y: auto; }
 @media (min-width: 640px) {
-  .wui-card { left: 0; right: 0; margin: 0 auto; width: min(26rem, calc(100vw - 2rem)); bottom: calc(1.5rem + var(--sab)); max-height: min(100dvh - 10.25rem, max(50dvh - 2rem, 18rem)); }
-  .wui-card.wui-hudgap { max-height: min(100dvh - 13rem, max(50dvh - 2rem, 18rem)); }
+  .wui-card { left: 0; right: 0; margin: 0 auto; width: min(26rem, calc(100vw - 2rem)); bottom: calc(2rem + var(--sab)); max-height: max(min(calc(100dvh - var(--h)), max(calc(50dvh - 2rem), 18rem)), var(--floor)); }
 }
-/* 顶边一道细光，颜色与光柱一致：普通是金，紧急是暖橙。界面与世界用同一套信号色 */
-.wui-card::before { content: ''; position: absolute; left: 1.25rem; right: 1.25rem; top: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--edge), transparent); }
-.wui-card.wui-urgent { --edge: var(--ember); }
-.wui-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
-.wui-tag { color: var(--gold); border: 1px solid var(--gold-dim); background: rgba(201, 169, 97, .08); }
-.wui-tag.wui-ember { color: #e5bfa4; border-color: rgba(200, 122, 69, .6); background: rgba(200, 122, 69, .16); }
-.wui-tag.wui-ok { color: #b4d2c4; border-color: rgba(109, 155, 135, .55); background: rgba(109, 155, 135, .14); }
-.wui-chip { border: 1px solid var(--gold-dim); }
-.wui-role { min-height: 1.75rem; border: 1px solid rgba(237, 228, 211, .12); background: rgba(237, 228, 211, .04); }
-.wui-role.wui-mine { color: var(--gold-bright); border-color: rgba(201, 169, 97, .6); background: rgba(201, 169, 97, .14); }
+/* 压在 3D 地图上的一切用 float 阴影；紧急再加珊瑚色外圈，与 3D 徽章头顶的「!」同一个信号 */
+.cute-card.wui-card { border-color: #fff; box-shadow: var(--cute-shadow-float); }
+.cute-card.wui-urgent { box-shadow: 0 0 0 3px var(--cute-coral-400), var(--cute-shadow-float); }
+.cute-card-head .cute-chip.wui-chip-urgent { padding-left: 3px; color: var(--cute-coral-600); }
+.cute-card-head .cute-chip.wui-chip-ok { color: var(--cute-success-600); }
+.cute-card-head .cute-icon-btn { box-shadow: 0 2px 0 rgba(31, 45, 68, .14); }
+.wui-body { overscroll-behavior: contain; }
+.wui-task > .cute-chip { margin-right: 8px; vertical-align: 2px; }
 /* 委托说明是氛围文字，优先级最低：手机上让位给「去哪、多远、给什么」，桌面空间够再显示 */
-.wui-desc { display: none; padding-left: .625rem; border-left: 2px solid var(--gold-dim); }
+.wui-desc { display: none; padding-left: 10px; border-left: 3px solid var(--cute-line); }
 @media (min-width: 640px) { .wui-desc { display: block; } }
-.wui-reason { border-left: 2px solid var(--ember); background: rgba(200, 122, 69, .12); color: #e5bfa4; }
-/* 进行中 / 已完成是状态说明而不是警告，用铜绿，免得玩家以为自己做错了什么 */
-.wui-reason.wui-calm { border-color: var(--verdigris); background: rgba(109, 155, 135, .12); color: #d9e8e0; }
-.wui-foot { border-top: 1px solid rgba(201, 169, 97, .16); }
-.wui-accept { min-width: 8rem; letter-spacing: .1em; color: var(--ink); background: linear-gradient(180deg, var(--gold-bright), var(--gold)); box-shadow: inset 0 1px 0 rgba(255, 250, 235, .4), 0 0 0 1px rgba(232, 207, 148, .55), 0 8px 20px rgba(0, 0, 0, .45); }
-.wui-accept:disabled { color: #9c907a; background: var(--stone); box-shadow: inset 0 0 0 1px var(--stone-edge); letter-spacing: .06em; }
+.wui-accept { flex: 1 0 auto; min-width: 9.5rem; }
 
 /* ── SettlementToast ──
-   居中偏上：顶边避开右上按钮列（到 120px 为止），低于档案弹窗（1300）。 */
-.wui-st { position: fixed; z-index: 1250; left: 0; right: 0; margin: 0 auto; top: max(calc(8rem + var(--sat)), 16vh); width: min(23rem, calc(100vw - 2rem)); animation: wui-st-in 320ms var(--ease-out-soft) both; }
+   手机：贴在右上按钮列（止于 120px）之下，不再居中——居中会盖住画面 64% 高处的玩家与升级纸屑（QA-R1-11）。
+   桌面：TopHud 在左上、按钮列在右上，居中的卡片两边都碰不到，可以贴得更高，把 60% 高处的玩家整个让出来。 */
+/* 白色模态卡用 .cute-modal 原语（28 圆角、shadow-3、弹性进场），这里只管位置 */
+.wui-st { z-index: 1250; top: calc(7.75rem + var(--sat)); }
+@media (min-width: 640px) { .wui-st { top: max(calc(6rem + var(--sat)), 10vh); } }
+/* 横屏手机（高 ≤ 480）放不下：贴到 TopHud 底边下面，整张卡留在屏内 */
+@media (max-height: 480px) { .wui-st { top: calc(5.25rem + var(--sat)); } }
 /* 升级拍（--lvbeat）：卡片被「等级提升」砸得一沉再回位。第二段不写 fill，延迟期间不会盖掉入场动画 */
-.wui-st.wui-lvl { animation: wui-st-in 320ms var(--ease-out-soft) both, wui-st-hit 280ms var(--ease-out-soft) var(--lvbeat); }
-.wui-st.wui-out { pointer-events: none; animation: wui-out 240ms ease-in both; }
-.wui-crest { display: flex; align-items: center; gap: .625rem; }
-.wui-crest::before, .wui-crest::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, transparent, var(--gold)); }
-.wui-crest::after { transform: scaleX(-1); }
-.wui-crest > i { width: .4375rem; height: .4375rem; transform: rotate(45deg); background: var(--gold); }
-.wui-cell { position: relative; box-shadow: inset 0 0 0 1px rgba(201, 169, 97, .16); }
-/* 落账：数字像盖章一样一顿（放大 → 略压 → 回位），格子里一团金光一闪而过。每笔只播一次 */
-.wui-cell::after { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; opacity: 0; background: radial-gradient(70% 80% at 50% 45%, rgba(232, 207, 148, .38), transparent 70%); box-shadow: inset 0 0 0 1px rgba(232, 207, 148, .7); }
-.wui-land::after { animation: wui-cellflash 520ms ease-out; }
-.wui-land .wui-amt { animation: wui-stamp 340ms var(--ease-out-soft); }
+.wui-st.wui-lvl { animation: wui-pop var(--cute-dur-pop) var(--cute-ease-spring) both, wui-hit .28s var(--cute-ease-out) var(--lvbeat); }
+.wui-st.wui-out { pointer-events: none; animation: cute-pop-out .24s var(--cute-ease-in) both; }
+/* 顶上探出半个的公会徽记：和底部公会徽章按钮同一套盾 + 星——这一单是公会认可的 */
+.wui-seal { top: -28px; left: 50%; margin-left: -28px; border-color: #fff; background: radial-gradient(circle at 50% 28%, var(--cute-teal-600), var(--cute-teal-700) 52%, var(--cute-sky-600)); box-shadow: 0 4px 0 var(--cute-teal-800), var(--cute-shadow-2); animation: wui-seal .48s var(--cute-ease-spring) 60ms both; }
+/* 落账：数字像盖章一样一顿，格子亮一圈。每笔只播一次 */
+.wui-cell::after { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; opacity: 0; box-shadow: inset 0 0 0 2px var(--tone-400), 0 0 0 4px #fff; }
+.wui-land::after { animation: wui-flash .52s ease-out; }
+.wui-land .wui-amt { animation: wui-stamp .34s var(--cute-ease-spring); }
 /* 贡献是第四笔、不计数：经验落账（--land2）后浮现 */
-.wui-contrib { animation: wui-fade 320ms ease-out var(--land2, 0ms) both; }
-/* 最终值与计数中的值叠在同一格：最终值从第一帧就在 DOM 里，读屏与自动化读到的永远是结算结果；
-   计数只是盖在上面的视觉层，两者都是等宽数字，计数过程中版面不跳。 */
+.wui-contrib { animation: cute-fade-in .32s ease-out var(--land2, 0ms) both; }
+/* 最终值与计数中的值叠在同一格：最终值从第一帧就在 DOM 里，读屏与自动化读到的永远是结算结果；计数只是盖在上面的视觉层 */
 .wui-num { display: inline-grid; }
 .wui-num > * { grid-area: 1 / 1; }
 .wui-hide { opacity: 0; }
-/* 「等级提升」在升级拍（--lvbeat）砸下来——与 3D 世界的爆发、顶栏等级跳动同一拍；背后一团金光张开又散去 */
-.wui-band { position: relative; isolation: isolate; border: 1px solid rgba(232, 207, 148, .55); background: radial-gradient(120% 140% at 50% 0%, rgba(232, 207, 148, .24), rgba(201, 169, 97, .06) 60%, transparent); box-shadow: 0 0 22px rgba(232, 207, 148, .16); animation: wui-slam 460ms var(--ease-out-soft) var(--lvbeat, 1s) both; }
-.wui-band::before { content: ''; position: absolute; inset: -40% -12%; z-index: -1; pointer-events: none; border-radius: 50%; opacity: 0; background: radial-gradient(closest-side, rgba(232, 207, 148, .7), transparent); animation: wui-burst 900ms ease-out var(--lvbeat, 1s); }
+/* 「等级提升」：暖黄底深棕字（黄底上永远不放白字）+ 玩具厚边；在升级拍砸下来，四周迸出星星纸屑（位置与颜色由组件按颗给） */
+.wui-band { background: var(--cute-sun-400); color: var(--cute-sun-ink); box-shadow: 0 4px 0 var(--cute-sun-lip); animation: wui-slam .46s var(--cute-ease-spring) var(--lvbeat, 1s) both; }
+.wui-band > i { position: absolute; top: 50%; left: 50%; width: 12px; height: 12px; margin: -6px; opacity: 0; clip-path: polygon(50% 0, 63% 37%, 100% 50%, 63% 63%, 50% 100%, 37% 63%, 0 50%, 37% 37%); background: var(--c); animation: wui-confetti .46s var(--cute-ease-out) var(--lvbeat, 1s) both; }
 
-/* ── 动效：面板只用淡入与小幅缩放（前庭友好，≤6%、至多一次过冲），不从屏幕外滑入、不弹跳。
-   盖章、跳字这类大幅缩放只给数字这种小元素：它们是「这一笔记上了」的信号，强度与事件重要性成正比 ── */
-@keyframes wui-rise { from { opacity: 0; transform: scale(.97); } }
-@keyframes wui-out { to { opacity: 0; transform: scale(.98); } }
-@keyframes wui-lv { 20% { transform: scale(1.25); text-shadow: 0 0 12px rgba(232, 207, 148, .9); } }
-@keyframes wui-fade { from { opacity: 0; } }
-@keyframes wui-st-in { from { opacity: 0; transform: scale(.94); } 60% { opacity: 1; transform: scale(1.012); } }
-@keyframes wui-st-hit { 30% { transform: translateY(3px) scale(1.012); } }
-@keyframes wui-stamp { from { transform: scale(1.3); } 45% { transform: scale(.95); } }
-@keyframes wui-cellflash { from { opacity: 1; } to { opacity: 0; } }
-@keyframes wui-slam { from { opacity: 0; transform: scale(1.12); } 55% { opacity: 1; transform: scale(.985); box-shadow: 0 0 34px rgba(232, 207, 148, .55), inset 0 0 18px rgba(232, 207, 148, .3); } }
-@keyframes wui-burst { from { opacity: 0; transform: scale(.6); } 20% { opacity: 1; } to { opacity: 0; transform: scale(1.3); } }
-@keyframes wui-tick { 30% { transform: scale(1.35); color: var(--gold-bright); text-shadow: 0 0 10px rgba(232, 207, 148, .85); } }
+/* ── ActiveQuestHUD：TopHud 下 6px，整块锁在约 6.6rem 高——App 在有进行中委托时把告知条放在 12.25rem，HUD 必须在那之前收住 ── */
+.wui-aqh { animation: wui-pop var(--cute-dur-pop) var(--cute-ease-spring) both; }
+/* 左侧类型色竖条：与聚焦卡片的头部、3D 徽章是同一个颜色信号 */
+.wui-aqh::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 6px; background: var(--tone-400); }
+/* 16px 的标题不用展示字体（只给 ≥ 20px）；要压过 .cute-root 给 h1–h3 设的展示字体，选择器得多一层 */
+.wui-aqh .wui-aqh-t { font-family: var(--cute-font); }
+.cute-chip.wui-time { color: var(--cute-ink-2); }
+.wui-aqh-medal { display: grid; place-items: center; }
+/* 手机上 HUD 只有约 300px 宽：类型圆章与计时器的小钟让位给标题（左侧色条已经说明了类型） */
+@media (max-width: 639.98px) { .wui-aqh-medal, .wui-time > svg { display: none; } }
+/* 放弃：按钮本身 44×44，-4px 外边距让它在布局里只占 36px，标题行不变高；看得见的是里面那枚小圆钮 */
+.wui-abort { margin: -4px; padding: 0 4px; border: 0; background: none; cursor: pointer; touch-action: manipulation; }
+.wui-abort-chip { background: var(--cute-panel-2); color: var(--cute-ink-3); transition: background-color var(--cute-dur-fast), color var(--cute-dur-fast); }
+.wui-abort[data-armed='true'] .wui-abort-chip { background: var(--cute-coral-50); color: var(--cute-coral-600); box-shadow: inset 0 0 0 2px var(--cute-coral-400); animation: cute-wiggle .42s var(--cute-ease-spring); }
+.wui-abort:focus-visible { outline: none; }
+.wui-abort:focus-visible .wui-abort-chip { box-shadow: var(--cute-focus-ring); }
+.wui-acts { grid-template-columns: 1fr 1fr 1.4fr; }
+.cute-btn.wui-abtn { min-width: 0; min-height: 44px; padding: 0 8px; gap: 6px; }
+.cute-btn-secondary.wui-on { background-color: var(--cute-teal-50); border-color: var(--cute-teal-400); }
 
-/* 减少动态效果：没有计数、盖章、跳字、砸下与光爆；所有数字与「等级提升」一次性淡入，信息一样不少 */
+/* ── ProofSubmission：整页晴空底（.cute-page），中间一张白色「相框」卡 ── */
+.wui-proof { padding: calc(12px + var(--sat)) calc(16px + var(--sar)) calc(16px + var(--sab)) calc(16px + var(--sal)); }
+/* 相框：竖版 3:4，高度受视口限制——横屏手机上整张卡仍放得下，不用滚动才看得到上传钮 */
+.wui-frame { position: relative; display: grid; place-items: center; width: min(24rem, 100%, calc((100dvh - 11rem - var(--sat) - var(--sab)) * .75)); aspect-ratio: 3 / 4; overflow: hidden; border-radius: var(--cute-r-xl); background: #fff; box-shadow: var(--cute-shadow-2); }
+.wui-frame::before { content: ''; position: absolute; inset: 12px; border: 3px dashed var(--cute-line-strong); border-radius: var(--cute-r-card); }
+.wui-frame > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+/* 相机钮：青色玩具圆钮，按下会沉；input 只做视觉隐藏，键盘 Tab 到它时焦点环画在圆钮上 */
+.wui-cam-disc { border-color: #fff; background: var(--cute-teal-600); box-shadow: 0 5px 0 var(--cute-teal-800), var(--cute-shadow-2); transition: transform var(--cute-dur-fast) var(--cute-ease-spring); }
+.wui-cam:active .wui-cam-disc { transform: translateY(4px) scale(.95); box-shadow: 0 1px 0 var(--cute-teal-800); }
+.wui-cam:focus-within .wui-cam-disc { box-shadow: 0 5px 0 var(--cute-teal-800), var(--cute-focus-ring); }
+.wui-scan { background: rgba(255, 255, 255, .28); }
+.wui-scan > i { position: absolute; left: 12px; right: 12px; height: 6px; border-radius: 99px; background: var(--cute-teal-400); box-shadow: 0 0 0 3px rgba(255, 255, 255, .7), 0 0 18px var(--cute-teal-400); animation: wui-scan 2s ease-in-out infinite; }
+.wui-grade { background: rgba(255, 255, 255, .9); animation: cute-fade-in .24s linear both; }
+.wui-grade > div { animation: cute-float 2.4s ease-in-out infinite; }
+
+/* ── 动效：进场是带约 10% 过冲的弹性放大（风格指南 3.8），单次都 ≤ 480ms ── */
+@keyframes wui-pop { from { opacity: 0; transform: scale(.9); } }
+@keyframes wui-seal { from { opacity: 0; transform: scale(.4) rotate(-20deg); } }
+@keyframes wui-lv { 35% { transform: scale(1.35) rotate(-6deg); } }
+@keyframes wui-tick { 35% { transform: scale(1.3); } }
+@keyframes wui-hit { 30% { transform: translateY(4px); } }
+@keyframes wui-stamp { from { transform: scale(1.3); } 45% { transform: scale(.94); } }
+@keyframes wui-flash { from { opacity: 1; } }
+@keyframes wui-slam { from { opacity: 0; transform: scale(1.18); } 55% { opacity: 1; transform: scale(.97); } }
+@keyframes wui-confetti { from { opacity: 1; transform: scale(.4); } 70% { opacity: 1; } to { opacity: 0; transform: translate(var(--x), var(--y)) rotate(160deg); } }
+@keyframes wui-scan { from { top: 12px; } to { top: calc(100% - 18px); } }
+
+/* 减少动态效果：没有缩放、过冲、计数、盖章、跳字、砸下、纸屑与扫描光；所有东西一次性淡入，信息一样不少 */
 @media (prefers-reduced-motion: reduce) {
-  .wui-card, .wui-st, .wui-st.wui-lvl, .wui-band { animation: wui-fade 160ms linear both; }
-  .wui-st.wui-out { animation: wui-fade 160ms linear reverse both; }
-  .wui-lvup .wui-lv, .wui-gain-g .wui-g, .wui-gain-t .wui-t, .wui-land .wui-amt, .wui-land::after, .wui-band::before, .wui-contrib { animation: none; }
-  .wui-bar > span, .wui-wc { transition: none; }
-  .wui-btn:active:not(:disabled) { transform: none; }
+  .wui-card, .wui-st.wui-lvl, .wui-band, .wui-aqh, .wui-seal, .wui-note { animation: cute-fade-in .15s linear both; }
+  .wui-st.wui-out { animation: none; opacity: 0; }
+  .wui-lvup .wui-lv, .wui-gain-g .wui-g, .wui-gain-t .wui-t, .wui-land .wui-amt, .wui-land::after, .wui-contrib, .wui-abort[data-armed='true'] .wui-abort-chip, .wui-scan > i, .wui-grade > div { animation: none; }
+  .wui-band > i { display: none; animation: none; }
+  .wui-xp .cute-progress-fill, .wui-wc, .wui-hud, .wui-cam-disc { transition: none; }
+  .cute-panel-float.wui-hud:active, .wui-cam:active .wui-cam-disc { transform: none; }
 }
-
 /* 悬停只给真有指针悬停的设备：触屏上 :hover 会在点按后一直粘着，按过的按钮看起来像被选中了 */
-@media (hover: hover) {
-  .wui-hud:hover { border-color: rgba(201, 169, 97, .6); }
-  .wui-wcb:hover:not(:disabled) { background: rgba(201, 169, 97, .14); color: var(--gold-bright); }
-  .wui-x:hover { color: var(--parchment); background: rgba(237, 228, 211, .06); }
-  .wui-accept:hover:not(:disabled) { filter: brightness(1.07); }
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .wui-hud:hover { transform: translateY(-1px); }
+  .wui-cam:hover .wui-cam-disc { transform: scale(1.04); }
 }
+@media (hover: hover) { .wui-abort:hover .wui-abort-chip { color: var(--cute-coral-600); background: var(--cute-coral-50); } }

@@ -1,13 +1,14 @@
 import React, { useEffect, useId, useRef } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { Check, CircleCheck, Coins, Flame, Lock, MapPin, ShieldCheck, Sparkles, X } from 'lucide-react';
+import { Check, CircleCheck, Clock, Coins, Lock, MapPin, ShieldCheck, Sparkles, X } from 'lucide-react';
 import type { Profession, Quest } from '../../../types';
 import { PROFESSION_CONFIG } from '../../../constants';
 import { UI_STRINGS, int, type UiLang } from './strings';
+import { QUEST_ICON, QUEST_TYPE_EN, toneClass } from './questVisual';
 import './worldUi.css';
 
 /**
- * 委托聚焦卡片，取代 Leaflet 弹窗。
+ * 委托聚焦卡片，取代 Leaflet 弹窗。可爱风格的委托卡：类型色铺头部（白色圆章 + 类型标签），白色正文。
  *
  * 信息顺序按「前 30 秒」里玩家要做的决定排：现实中要做什么 → 在哪、多远 → 门槛 → 给什么 → 接不接。
  * 奖励与「承接契约」固定在底部、不随内容滚动：卡片再长，主操作也始终在拇指够得到的同一个位置。
@@ -16,8 +17,6 @@ import './worldUi.css';
  * 卡片自己唯一的判断是「这个按钮现在能不能按、为什么」，依据全部来自 props。
  *
  * 不抢焦点：艾琳娜通过工具聚焦委托时玩家可能正在她的输入框里打字，抢走焦点会吞掉按键。
- *
- * 图标只用入口包里已经有的（加上 Coins）：每个新图标约 0.45KB，装饰性的一律换成文字或 CSS。
  */
 export interface QuestFocusCardProps {
   quest: Quest | null;
@@ -40,14 +39,6 @@ export interface QuestFocusCardProps {
   lang?: UiLang;
 }
 
-const TYPE_EN: Record<Quest['type'], string> = {
-  物资运输: 'Supply Run',
-  魔物讨伐: 'Monster Hunt',
-  迷宫建设: 'Dungeon Works',
-  异界交涉: 'Envoy',
-  紧急救援: 'Rescue',
-};
-
 /**
  * 不能接取的原因。顺序按「玩家最该先知道哪一条」排：
  * 已完成是永久的，所以排在「手上还有别的」这种暂时状态之前——
@@ -62,10 +53,16 @@ const BLOCK_ICON: Record<Exclude<Block, null>, LucideIcon> = {
   level: Lock,
 };
 
+/** 原因条的色调：等级不足 / 手上有别的是「注意」；正在做是信息，做完了是成功——这两种不该让人以为自己做错了什么 */
+const BLOCK_TONE: Record<Exclude<Block, null>, string> = {
+  active: 'cute-tone-sky',
+  done: 'cute-tone-success',
+  busy: 'cute-tone-warn',
+  level: 'cute-tone-warn',
+};
+
 const isEditable = (el: EventTarget | null) =>
   el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
-
-const TAG = 'wui-tag inline-flex items-center gap-1 h-6 px-2 rounded-md text-xs tracking-wide whitespace-nowrap';
 
 const QuestFocusCard: React.FC<QuestFocusCardProps> = ({
   quest, userLevel, userProfession, isActive, hasActiveQuest, distanceText, onAccept, onClose,
@@ -106,12 +103,18 @@ const QuestFocusCard: React.FC<QuestFocusCardProps> = ({
   const BlockIcon = block ? BLOCK_ICON[block] : null;
   const acceptLabel = block === 'active' ? t.acceptActive : block === 'done' ? t.acceptDone : t.accept;
   const roles = quest.neededProfessions ?? [];
+  const TypeIcon = QUEST_ICON[quest.type] ?? MapPin;
+  // 已完成 / 等级不足时头部换成冷灰蓝（原语 is-done / is-locked）：一眼看出「这张现在接不了」，原因仍写在卡里
+  const stateClass = isCompleted && !isActive ? ' is-done' : block === 'level' ? ' is-locked' : '';
+
+  // 12px 小标签只给 ≤ 6 个字的中文角标（指南 3.4）；英文词更长，用 14px 的常规标签
+  const sm = lang === 'zh' ? ' cute-chip-sm' : '';
 
   const rewards: [string, LucideIcon, string, number][] = [
-    ['gold', Coins, 'text-amber-400', quest.rewardGold],
-    ['trust', ShieldCheck, 'text-emerald-400', quest.trustPoints],
+    ['gold', Coins, 'cute-tone-sun', quest.rewardGold],
+    ['trust', ShieldCheck, 'cute-tone-success', quest.trustPoints],
   ];
-  if (typeof rewardMagicules === 'number') rewards.push(['xp', Sparkles, 'text-amber-200', rewardMagicules]);
+  if (typeof rewardMagicules === 'number') rewards.push(['xp', Sparkles, 'cute-tone-sky', rewardMagicules]);
   const rewardLabel: Record<string, string> = { gold: t.gold, trust: t.trust, xp: t.xp };
 
   return (
@@ -123,59 +126,66 @@ const QuestFocusCard: React.FC<QuestFocusCardProps> = ({
       role="dialog"
       aria-modal="false"
       aria-labelledby={titleId}
-      className={`wui-card wui-flat rune-panel parchment-noise flex flex-col overflow-hidden rounded-2xl text-slate-100${quest.isUrgent ? ' wui-urgent' : ''}${hasActiveQuest ? ' wui-hudgap' : ''}`}
+      className={`cute-root cute-card wui-card fixed flex flex-col ${toneClass(quest.type)}${stateClass}${quest.isUrgent ? ' wui-urgent' : ''}${hasActiveQuest ? ' wui-hudgap' : ''}`}
     >
-      <header className="flex items-start gap-2 pt-1 pr-1 pl-4">
-        <div className="flex flex-1 min-w-0 flex-wrap gap-1.5 pt-3">
-          <span className={TAG} data-testid="quest-type">{lang === 'en' ? TYPE_EN[quest.type] ?? quest.type : quest.type}</span>
-          {/* 紧急不只靠颜色：火焰图标 + 文字，色弱玩家也读得出 */}
+      <header className="cute-card-head shrink-0 gap-2.5 py-2 pl-3.5 pr-2">
+        <span className="cute-card-medal" aria-hidden="true"><TypeIcon strokeWidth={2.5} /></span>
+        <div className="flex flex-1 min-w-0 flex-wrap gap-1.5">
+          <span className="cute-chip" data-testid="quest-type">{lang === 'en' ? QUEST_TYPE_EN[quest.type] ?? quest.type : quest.type}</span>
+          {/* 紧急不只靠颜色：弹跳的「!」+ 文字，色弱玩家也读得出；与 3D 徽章头顶的「!」气泡是同一个符号 */}
           {quest.isUrgent && (
-            <span className={`${TAG} wui-ember`} data-testid="quest-urgent"><Flame size={13} strokeWidth={2} />{t.urgent}</span>
+            <span className="cute-chip wui-chip-urgent gap-1.5" data-testid="quest-urgent">
+              <span className="cute-badge-bang" aria-hidden="true">!</span>{t.urgent}
+            </span>
           )}
-          {isActive && <span className={`${TAG} wui-ok`}>{t.active}</span>}
+          {isActive && <span className="cute-chip"><MapPin strokeWidth={2.5} aria-hidden="true" />{t.active}</span>}
           {isCompleted && !isActive && (
-            <span className={`${TAG} wui-ok`}><CircleCheck size={13} strokeWidth={2} />{t.done}</span>
+            <span className="cute-chip wui-chip-ok"><CircleCheck strokeWidth={2.5} aria-hidden="true" />{t.done}</span>
           )}
         </div>
         <button
           type="button"
           data-testid="quest-close"
-          className="wui-x wui-btn w-12 h-12 flex-shrink-0 flex items-center justify-center rounded-xl text-slate-300"
+          className="cute-icon-btn"
           onClick={onClose}
           aria-label={t.closeCard}
           title={t.closeCard}
         >
-          <X size={20} strokeWidth={2} />
+          <X strokeWidth={2.5} aria-hidden="true" />
         </button>
       </header>
 
-      <div className="wui-body flex flex-col gap-2.5 px-4 pb-3">
-        <h2 id={titleId} className="wui-wrap fantasy-font text-lg font-bold leading-snug" data-testid="quest-title">{quest.title}</h2>
-        <p className="wui-wrap text-[15px] leading-snug" data-testid="quest-real-task">
-          <span className="wui-chip mr-2 rounded px-1.5 text-xs tracking-wider text-amber-400">{t.realTask}</span>
+      <div className="wui-body flex flex-1 flex-col gap-2.5 min-h-0 overflow-y-auto px-4 pt-3.5 pb-3">
+        <h2 id={titleId} className="m-0 text-cute-xl wui-wrap" data-testid="quest-title">{quest.title}</h2>
+        <p className="wui-task m-0 text-cute-body font-bold wui-wrap" data-testid="quest-real-task">
+          <span className={`cute-chip cute-tone-teal${sm}`}>{t.realTask}</span>
           {quest.realTask}
         </p>
 
-        <ul className="wui-wrap flex flex-col gap-1 text-sm leading-snug text-slate-300">
-          <li className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
-            <span className="inline-flex items-center gap-1.5 min-w-0"><MapPin size={15} strokeWidth={2} className="flex-shrink-0 text-amber-400" />{quest.locationName}</span>
+        <ul className="m-0 p-0 list-none flex flex-col gap-1 text-cute-sm text-cute-ink-2 wui-wrap">
+          <li className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span className="inline-flex items-center gap-1 min-w-0"><MapPin size={16} strokeWidth={2.5} className="shrink-0 text-cute-ink-3" aria-hidden="true" />{quest.locationName}</span>
             {/* 没有定位就说不知道，不拿默认坐标假装算出一个距离 */}
-            <span data-testid="quest-distance" className={distanceText ? 'wui-tnum font-bold text-amber-200' : 'text-slate-500'}>
+            <span data-testid="quest-distance" className={distanceText ? 'cute-num text-cute-ink' : 'text-cute-ink-3'}>
               {distanceText ?? t.distUnknown}
             </span>
           </li>
-          <li className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
+          <li className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <span>{quest.difficulty}</span>
-            <span>{t.minutes(quest.estimatedTime)}</span>
-            <span data-testid="quest-min-level" className={levelShort ? 'inline-flex items-center gap-1 text-red-300' : undefined}>
-              {levelShort && <Lock size={14} strokeWidth={2} />}
-              {t.needLv(quest.minLevel)}{levelShort ? ` · ${t.youLv(lv)}` : ''}
-            </span>
+            <span className="inline-flex items-center gap-1"><Clock size={16} strokeWidth={2.5} className="shrink-0 text-cute-ink-3" aria-hidden="true" />{t.minutes(quest.estimatedTime)}</span>
+            {levelShort ? (
+              <span data-testid="quest-min-level" className="cute-chip cute-tone-warn">
+                <Lock strokeWidth={2.5} aria-hidden="true" />
+                {t.needLv(quest.minLevel)} · {t.youLv(lv)}
+              </span>
+            ) : (
+              <span data-testid="quest-min-level">{t.needLv(quest.minLevel)}</span>
+            )}
           </li>
         </ul>
 
         {roles.length > 0 && (
-          <ul className="flex flex-wrap gap-1.5" aria-label={t.roles}>
+          <ul className="m-0 p-0 list-none flex flex-wrap gap-1.5" aria-label={t.roles}>
             {roles.map((p) => {
               const mine = p === userProfession;
               const info = PROFESSION_CONFIG[p];
@@ -183,11 +193,11 @@ const QuestFocusCard: React.FC<QuestFocusCardProps> = ({
                 <li
                   key={p}
                   data-testid={mine ? 'quest-suits' : undefined}
-                  className={`wui-role inline-flex items-center gap-1 rounded-lg px-2 py-0.5 text-[13px]${mine ? ' wui-mine' : ' text-slate-300'}`}
+                  className={`cute-chip${sm}${mine ? ' cute-chip-solid cute-tone-teal' : ' cute-chip-dot'}`}
                 >
-                  <span aria-hidden="true">{info?.icon}</span>
+                  {/* 职业的 emoji 图标不再显示（指南 3.9：不用 emoji 作图标），文字本身就够 */}
                   {lang === 'en' ? info?.tagline ?? p : p}
-                  {mine && <><Check size={13} strokeWidth={2.5} />{t.suitsYou}</>}
+                  {mine && <><Check strokeWidth={3} aria-hidden="true" />{t.suitsYou}</>}
                 </li>
               );
             })}
@@ -195,34 +205,30 @@ const QuestFocusCard: React.FC<QuestFocusCardProps> = ({
         )}
 
         {quest.rewardDesc && (
-          <p className="wui-wrap text-sm text-slate-300" data-testid="quest-bonus">
-            <span className="text-amber-400">{t.bonus}{t.colon}</span>{quest.rewardDesc}
+          <p className="m-0 text-cute-sm text-cute-ink-2 wui-wrap" data-testid="quest-bonus">
+            <b className="font-black text-cute-sun-600">{t.bonus}{t.colon}</b>{quest.rewardDesc}
           </p>
         )}
 
-        <p className="wui-desc wui-wrap text-sm leading-relaxed text-slate-300">{quest.description}</p>
+        <p className="wui-desc m-0 text-cute-sm font-semibold text-cute-ink-3 wui-wrap">{quest.description}</p>
       </div>
 
       {block && reason && BlockIcon && (
-        <p
-          id={reasonId}
-          data-testid="quest-block-reason"
-          className={`wui-reason wui-wrap mx-4 mb-1 flex items-start gap-2 rounded-md px-2.5 py-2 text-sm leading-snug${block === 'active' || block === 'done' ? ' wui-calm' : ''}`}
-        >
-          <BlockIcon size={15} strokeWidth={2} className="flex-shrink-0 mt-0.5" />
+        <p id={reasonId} data-testid="quest-block-reason" className={`wui-tint wui-why wui-wrap flex items-start gap-2 mx-4 mb-1 px-3 py-2.5 rounded-cute-sm text-cute-sm font-extrabold ${BLOCK_TONE[block]}`}>
+          <BlockIcon size={16} strokeWidth={2.5} className="shrink-0 mt-0.5" aria-hidden="true" />
           <span>{reason}</span>
         </p>
       )}
 
-      <footer className="wui-foot flex items-center gap-3 px-4 pt-3 pb-4">
-        {/* 三项在 390px 宽下排成一行：折成两行会让卡片高出中线、盖住被聚焦的光柱。数字特别大时允许折行 */}
-        <dl className="flex flex-1 min-w-0 flex-wrap gap-2.5" aria-label={t.reward}>
+      <footer className="cute-card-foot shrink-0 flex-wrap gap-y-2.5">
+        {/* 图标与 TopHud 同一套（金币 Coins / 信任 ShieldCheck / 经验 Sparkles），名称给读屏与悬停 */}
+        <dl className="m-0 flex flex-wrap gap-1.5" aria-label={t.reward}>
           {rewards.map(([key, Icon, tone, value]) => (
-            <div key={key} className="flex flex-col-reverse">
-              <dt className="text-[11px] tracking-wider text-slate-500">{rewardLabel[key]}</dt>
+            <div key={key} className={`cute-chip cute-num text-cute-body font-black h-8 ${tone}`} title={rewardLabel[key]}>
+              <dt className="wui-sr">{rewardLabel[key]}</dt>
               {/* 「+」与数字包在同一个节点里，避免被 flex 间距拆开；testid 节点只放纯数字，方便断言 */}
-              <dd className="wui-tnum flex items-center gap-1 whitespace-nowrap text-[15px] font-bold leading-snug">
-                <Icon size={13} strokeWidth={2.25} className={tone} />
+              <dd className="m-0 inline-flex items-center gap-1">
+                <Icon size={16} strokeWidth={2.5} aria-hidden="true" />
                 <span>+<span data-testid={`quest-reward-${key}`}>{int(value)}</span></span>
               </dd>
             </div>
@@ -232,14 +238,14 @@ const QuestFocusCard: React.FC<QuestFocusCardProps> = ({
         <button
           type="button"
           data-testid="quest-accept"
-          className="wui-accept wui-btn flex-shrink-0 inline-flex items-center justify-center gap-2 h-12 px-4 rounded-2xl text-base font-bold whitespace-nowrap"
+          className="cute-btn cute-btn-primary wui-accept"
           disabled={block !== null}
           aria-describedby={block ? reasonId : undefined}
           onClick={() => {
             if (block === null) onAccept(quest);
           }}
         >
-          {BlockIcon && <BlockIcon size={17} strokeWidth={2} />}
+          {BlockIcon && <BlockIcon strokeWidth={2.5} aria-hidden="true" />}
           {acceptLabel}
         </button>
       </footer>

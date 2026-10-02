@@ -1,9 +1,9 @@
 /**
- * 3D 世界地图（契约 A）：风格化纽约，玩家的真实 GPS 位置是世界里的角色，委托是立在真实坐标上的光柱。
+ * 3D 世界地图（契约 A）：晴天里的纽约玩具地图，玩家的真实 GPS 位置是世界里的 Q 版角色，委托是立在真实坐标上的悬浮徽章。
  *
  * 只能由 App 通过 React.lazy 加载（three 只存在于这个分包里）。
  * WebGL 不可用或初始化失败时调用 onFallback(reason)，由 App 切回 2D 的 MapBoard。
- * 接取不在这里发生：点光柱只调用 onFocus，接取由 App 的卡片走 handleAccept（艾琳娜确认）。
+ * 接取不在这里发生：点徽章只调用 onFocus，接取由 App 的卡片走 handleAccept（艾琳娜确认）。
  */
 import React, { useEffect, useRef, useState } from 'react';
 import type { Quest, Race } from '../../../types';
@@ -21,9 +21,9 @@ export interface WorldMapProps {
   // ── 以下为契约 A 之外的可选扩展（只加不改）──
   /** 定位精度（米），画精度圈用；缺省 30 m */
   userAccuracy?: number | null;
-  /** 已完成的委托：光柱变暗、图钉换成勾 */
+  /** 已完成的委托：徽章换成灰蓝 + 白勾 */
   completedQuestIds?: string[];
-  /** 玩家等级：等级不足的光柱变暗、图钉换成锁 */
+  /** 玩家等级：等级不足的徽章换成灰蓝 + 小锁 */
   userLevel?: number;
   /** 强制减少动态效果；缺省跟随系统的 prefers-reduced-motion */
   reducedMotion?: boolean;
@@ -117,22 +117,14 @@ const WorldMap: React.FC<WorldMapProps> = (props) => {
         inset: 0,
         zIndex: 0,
         overflow: 'hidden',
-        background: '#1c1815',
+        // 晴空色：画布第一帧出来之前（以及 2D ↔ 3D 切换的一瞬）不闪黑（指南 5.1 的雾色）
+        background: '#EAF7FF',
         touchAction: 'none',
         userSelect: 'none',
         WebkitUserSelect: 'none',
       }}
     >
-      {/* 边缘暗角：把视线收回画面中心、托住上方 HUD 的可读性；只压最外一圈，不碰游玩区 */}
-      <div
-        aria-hidden="true"
-        style={{
-          position: 'absolute',
-          inset: 0,
-          pointerEvents: 'none',
-          background: 'radial-gradient(ellipse at 50% 46%, transparent 58%, rgba(28,24,21,0.22) 84%, rgba(28,24,21,0.48) 100%)',
-        }}
-      />
+      {/* 不加暗角（指南 5.9）：明亮的玩具地图要通透；HUD 的可读性交给白色面板与藏青软阴影 */}
       {failed && (
         <div
           role="alert"
@@ -142,7 +134,7 @@ const WorldMap: React.FC<WorldMapProps> = (props) => {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: '#ede4d3',
+            color: '#1F2D44',
             fontSize: 14,
             padding: 24,
             textAlign: 'center',

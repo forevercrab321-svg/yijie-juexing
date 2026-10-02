@@ -1,54 +1,65 @@
 /**
- * 昼夜与天空。
+ * 昼夜与天空（指南 5.1 昼夜关键帧、5.3 光照、5.9 氛围）。
  *
- * 按本地时间算太阳方位、天空色、雾色与曝光。入夜后太阳换成冷色的月光（同一盏投影光，
- * 阴影始终只有一盏），城市靠窗户、街灯、灯笼和光柱的暖光撑起画面。
+ * 色彩方向：白天是晴空下的玩具地图（天顶 #4FB2F2 → 地平线 #E4F5FF，雾 = 地平线附近的天色，地图「融进天空」）；
+ * 黄昏是桃色、夜里是海军蓝——不是琥珀、不是紫。
  *
- * 色彩方向：旷野之息式的「冷影暖光」——主光是偏金的暖阳，阴影里只剩偏蓝的天光（半球光天空色）
- * 和一盏从背光侧打来的冷色补光，于是同一栋楼的受光面、补光面、背光面是暖 / 冷 / 暗三档，
- * 而不是同一种灰的深浅。黄昏是琥珀，夜里是深石板蓝而不是紫。
+ * 亮度不靠灯光：每个材质都在白天 / 夜晚两套色板之间按 night 插值（palette.ts）。这里把主光 + 半球光
+ * 按「水平顶面受到的总亮度 ≈ 1」归一化——色板颜色进去，受光面原样出来（指南：受光面取色 ≈ 色板 hex）。
+ * 关键帧里的强度只决定「主光与天光的比例」，也就是受光面与背光面的明暗差：白天 2.6 : 1.4（立体），
+ * 夜里 0.9 : 0.8（柔和）。灯光颜色给冷暖倾向；夜里主光往白色收一大半——夜色已经写在色板里，再乘一盏蓝月光会发紫。
  *
- * 雾色单独给（显示空间）：three 在色调映射之后才混雾，雾不经过 grade.ts 的调色。
- * 白天的远景往「浅、略冷」退（空气透视），夜里往深石板蓝退。
+ * 太阳：正午仰角约 55°（比真实的 47° 高，阴影短），任何时段不低于 35°——上一版日出日落时的长投影把半条街压黑。
  */
 import * as THREE from 'three';
+import { SKY } from './palette';
 
 interface SkyKey {
   h: number;
   top: string;
+  mid?: string;
   horizon: string;
-  sun: string;
+  light: string;
+  lightI: number;
   hemiSky: string;
   hemiGround: string;
+  hemiI: number;
   /** 显示空间的雾色（远景退向的颜色） */
   fog: string;
-  /** 背光侧冷色补光 */
-  fill: string;
 }
 
+const NIGHT: Omit<SkyKey, 'h'> = { top: '#0E1838', horizon: '#2B3C72', light: '#A9BCFF', lightI: 0.9, hemiSky: '#34477F', hemiGround: '#141D38', hemiI: 0.8, fog: '#1C2A55' };
+const DAY: Omit<SkyKey, 'h'> = { top: '#4FB2F2', mid: SKY.dayMid, horizon: '#E4F5FF', light: '#FFF6E2', lightI: 2.6, hemiSky: '#DDF1FF', hemiGround: '#C4E8A6', hemiI: 1.4, fog: '#EAF7FF' };
+
 const KEYS: SkyKey[] = [
-  { h: 0, top: '#121a27', horizon: '#2b3140', sun: '#9fb2d2', hemiSky: '#34435c', hemiGround: '#221d18', fog: '#1e2430', fill: '#566a8c' },
-  { h: 5, top: '#1b2433', horizon: '#3d3a36', sun: '#9fb2d2', hemiSky: '#3a4659', hemiGround: '#251f19', fog: '#252a33', fill: '#56688a' },
-  { h: 6.6, top: '#56688a', horizon: '#e2a77a', sun: '#ffbb80', hemiSky: '#b4b6c0', hemiGround: '#6e5a44', fog: '#c9a888', fill: '#8f9cb8' },
-  { h: 8.2, top: '#7fa1c0', horizon: '#e6d6bc', sun: '#ffdcae', hemiSky: '#a9bdd6', hemiGround: '#8f775a', fog: '#d3d2c8', fill: '#9cb2d2' },
-  { h: 12.5, top: '#8fb0c9', horizon: '#e9dfc9', sun: '#ffe2b6', hemiSky: '#a6bcd8', hemiGround: '#937a5b', fog: '#d6d6cd', fill: '#a3b8d6' },
-  { h: 16.6, top: '#86a4bd', horizon: '#e8d3b0', sun: '#ffd69e', hemiSky: '#adbcd0', hemiGround: '#8f7657', fog: '#d8d0bf', fill: '#9fb1cc' },
-  { h: 18.3, top: '#4f5f80', horizon: '#e0935e', sun: '#ffaa66', hemiSky: '#b7a89c', hemiGround: '#6f5640', fog: '#c7997a', fill: '#8a92b0' },
-  { h: 19.6, top: '#27324a', horizon: '#6a4e3b', sun: '#c79a80', hemiSky: '#4f5468', hemiGround: '#33291f', fog: '#3b3536', fill: '#5d6886' },
-  { h: 21, top: '#141c29', horizon: '#2e3440', sun: '#9fb2d2', hemiSky: '#34435c', hemiGround: '#221d18', fog: '#1e2430', fill: '#566a8c' },
-  { h: 24, top: '#121a27', horizon: '#2b3140', sun: '#9fb2d2', hemiSky: '#34435c', hemiGround: '#221d18', fog: '#1e2430', fill: '#566a8c' },
+  { h: 0, ...NIGHT },
+  { h: 5, ...NIGHT },
+  { h: 6.6, top: '#7FA6E8', horizon: '#FFD2B8', light: '#FFC9A0', lightI: 1.6, hemiSky: '#C9D8F5', hemiGround: '#B5D69A', hemiI: 1.1, fog: '#F4DCCB' },
+  { h: 8.2, ...DAY },
+  { h: 16.6, ...DAY },
+  { h: 18.3, top: '#6F8FE0', horizon: '#FFC2A6', light: '#FFB48A', lightI: 1.8, hemiSky: '#F2D4CF', hemiGround: '#B9CF98', hemiI: 1.1, fog: '#F6D0C0' },
+  { h: 19.6, top: '#24326A', horizon: '#4D5E96', light: '#B7C4F0', lightI: 1.0, hemiSky: '#3D4F86', hemiGround: '#18223F', hemiI: 0.9, fog: '#33447A' },
+  { h: 21, ...NIGHT },
+  { h: 24, ...NIGHT },
 ];
 
-const KEY_COLORS = KEYS.map((k) => ({
-  h: k.h,
-  top: new THREE.Color(k.top),
-  horizon: new THREE.Color(k.horizon),
-  sun: new THREE.Color(k.sun),
-  hemiSky: new THREE.Color(k.hemiSky),
-  hemiGround: new THREE.Color(k.hemiGround),
-  fog: new THREE.Color(k.fog),
-  fill: new THREE.Color(k.fill),
-}));
+const KEY_COLORS = KEYS.map((k) => {
+  const top = new THREE.Color(k.top);
+  const horizon = new THREE.Color(k.horizon);
+  return {
+    h: k.h,
+    top,
+    horizon,
+    // 中段没写的关键帧取天顶与地平线之间偏地平线的一点：天空下半截更亮，像晴天
+    mid: k.mid ? new THREE.Color(k.mid) : top.clone().lerp(horizon, 0.55),
+    light: new THREE.Color(k.light),
+    lightI: k.lightI,
+    hemiSky: new THREE.Color(k.hemiSky),
+    hemiGround: new THREE.Color(k.hemiGround),
+    hemiI: k.hemiI,
+    fog: new THREE.Color(k.fog),
+  };
+});
 
 export interface DayNight {
   hour: number;
@@ -57,18 +68,18 @@ export interface DayNight {
   /** 指向光源（太阳或月亮）的单位向量 */
   lightDir: THREE.Vector3;
   lightColor: THREE.Color;
+  /** 归一化之后实际给主光的强度 */
   lightIntensity: number;
   hemiSky: THREE.Color;
   hemiGround: THREE.Color;
   hemiIntensity: number;
   skyTop: THREE.Color;
+  skyMid: THREE.Color;
   skyHorizon: THREE.Color;
   fog: THREE.Color;
-  /** 冷色补光：方向与主光的水平方位相反、仰角较低，不投影 */
-  fillDir: THREE.Vector3;
-  fillColor: THREE.Color;
-  fillIntensity: number;
   exposure: number;
+  /** 太阳仰角（度），调试读数 */
+  sunElevation: number;
 }
 
 export function createDayNight(): DayNight {
@@ -82,12 +93,11 @@ export function createDayNight(): DayNight {
     hemiGround: new THREE.Color(),
     hemiIntensity: 1,
     skyTop: new THREE.Color(),
+    skyMid: new THREE.Color(),
     skyHorizon: new THREE.Color(),
     fog: new THREE.Color(),
-    fillDir: new THREE.Vector3(0, 1, 0),
-    fillColor: new THREE.Color(),
-    fillIntensity: 0,
     exposure: 1,
+    sunElevation: 55,
   };
 }
 
@@ -96,15 +106,19 @@ const smooth = (a: number, b: number, x: number) => {
   return t * t * (3 - 2 * t);
 };
 
-/** 十月初的纽约：日出约 6:55，日落约 18:40，正午太阳高度约 47° */
+/** 十月初的纽约：日出约 6:55，日落约 18:40 */
 const SUNRISE = 6.9;
 const SUNSET = 18.7;
-// 月亮挂得比原先高（仰角约 52°）：月光主要落在屋顶上，夜里俯瞰时楼群是一块块石板蓝的体块，
-// 立面留暗给窗灯——原先 41° 的月光把朝南的立面照得和屋顶一样亮
-const MOON_EL = 0.9;
-const MOON_DIR = new THREE.Vector3(Math.sin((205 * Math.PI) / 180) * Math.cos(MOON_EL), Math.sin(MOON_EL), -Math.cos((205 * Math.PI) / 180) * Math.cos(MOON_EL)).normalize();
+const DEG = Math.PI / 180;
+const SUN_MIN_EL = 35 * DEG;
+const SUN_MAX_EL = 55 * DEG;
+// 月亮仰角 52°：月光主要落在屋顶上，夜里俯瞰时楼群是一块块海军蓝的体块
+const MOON_EL = 52 * DEG;
+const MOON_DIR = new THREE.Vector3(Math.sin(205 * DEG) * Math.cos(MOON_EL), Math.sin(MOON_EL), -Math.cos(205 * DEG) * Math.cos(MOON_EL)).normalize();
+const WHITE = new THREE.Color(1, 1, 1);
 const _sun = new THREE.Vector3();
-const _sunCol = new THREE.Color();
+const _gray = new THREE.Color();
+const lum = (c: THREE.Color) => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
 
 export function computeDayNight(hourIn: number, out: DayNight): DayNight {
   const hour = ((hourIn % 24) + 24) % 24;
@@ -115,39 +129,47 @@ export function computeDayNight(hourIn: number, out: DayNight): DayNight {
   const b = KEY_COLORS[i + 1];
   const t = smooth(0, 1, (hour - a.h) / (b.h - a.h));
   out.skyTop.copy(a.top).lerp(b.top, t);
+  out.skyMid.copy(a.mid).lerp(b.mid, t);
   out.skyHorizon.copy(a.horizon).lerp(b.horizon, t);
+  out.fog.copy(a.fog).lerp(b.fog, t);
   out.hemiSky.copy(a.hemiSky).lerp(b.hemiSky, t);
   out.hemiGround.copy(a.hemiGround).lerp(b.hemiGround, t);
-  out.fog.copy(a.fog).lerp(b.fog, t);
-  out.fillColor.copy(a.fill).lerp(b.fill, t);
-  const sunCol = _sunCol.copy(a.sun).lerp(b.sun, t);
+  out.lightColor.copy(a.light).lerp(b.light, t);
+  const keyI = a.lightI + (b.lightI - a.lightI) * t;
+  const hemiI = a.hemiI + (b.hemiI - a.hemiI) * t;
 
   out.night = Math.max(1 - smooth(5.3, 7.3, hour), smooth(18.0, 20.0, hour));
 
-  // 太阳：东升西落，经过正南
+  // 太阳：东升西落，经过正南；仰角在 35°–55° 之间按日弧起落
   const k = (hour - SUNRISE) / (SUNSET - SUNRISE);
-  const elev = k > 0 && k < 1 ? Math.sin(Math.PI * k) * ((47 * Math.PI) / 180) : -0.1;
-  const az = ((95 + 170 * Math.min(1, Math.max(0, k))) * Math.PI) / 180;
-  _sun.set(Math.sin(az) * Math.cos(Math.max(elev, 0.06)), Math.sin(Math.max(elev, 0.06)), -Math.cos(az) * Math.cos(Math.max(elev, 0.06))).normalize();
-  const elevDeg = (elev * 180) / Math.PI;
-  const sunI = elev > 0 ? 3.2 * (0.3 + 0.7 * smooth(0, 22, elevDeg)) : 0.6;
+  const kk = Math.min(1, Math.max(0, k));
+  const elev = SUN_MIN_EL + (SUN_MAX_EL - SUN_MIN_EL) * Math.sin(Math.PI * kk);
+  const az = (95 + 170 * kk) * DEG;
+  _sun.set(Math.sin(az) * Math.cos(elev), Math.sin(elev), -Math.cos(az) * Math.cos(elev)).normalize();
   out.lightDir.copy(_sun).lerp(MOON_DIR, out.night).normalize();
-  out.lightColor.copy(sunCol);
-  // 月光比原先亮一些：屋顶要读得出体块（石板蓝），但仍远暗于窗灯与光柱
-  out.lightIntensity = sunI * (1 - out.night) + 0.62 * out.night;
-  // 白天的天光比原先略强：阴影要透气（偏蓝的中间调），而不是压成黑色
-  out.hemiIntensity = 1.2 * (1 - out.night) + 0.5 * out.night;
-  // 补光从主光的反方位、30° 仰角打来：照亮背光立面，并给它一层天空的冷色
-  const horiz = Math.hypot(out.lightDir.x, out.lightDir.z) || 1;
-  out.fillDir.set((-out.lightDir.x / horiz) * 0.866, 0.5, (-out.lightDir.z / horiz) * 0.866);
-  out.fillIntensity = 0.62 * (1 - out.night) + 0.16 * out.night;
-  out.exposure = 1.0 + 0.24 * out.night;
+  out.sunElevation = Math.round((Math.asin(out.lightDir.y) / DEG) * 10) / 10;
+
+  // 夜色已经写进色板：主光往白收、天光去掉一半饱和，免得蓝上加蓝。
+  // 白天的暖阳也往白收 45%：#FFF6E2 原样乘到粉彩墙上，受光面的蓝通道会掉 12–21/255（截图取色实测），奶油墙发黄
+  out.lightColor.lerp(WHITE, 0.45 + (0.88 - 0.45) * out.night);
+  _gray.setScalar(lum(out.hemiSky));
+  out.hemiSky.lerp(_gray, 0.6 * out.night);
+  _gray.setScalar(lum(out.hemiGround));
+  out.hemiGround.lerp(_gray, 0.4 * out.night);
+
+  // 归一化：水平顶面的总受光 = (主光·sinθ + 天光) / π ≈ 1
+  const top = (keyI * Math.max(0.3, out.lightDir.y) * lum(out.lightColor) + hemiI * lum(out.hemiSky)) / Math.PI;
+  const norm = 1 / Math.max(0.05, top);
+  out.lightIntensity = keyI * norm;
+  out.hemiIntensity = hemiI * norm;
+  out.exposure = 1;
   return out;
 }
 
 /**
- * 渐变天穹：一个跟随相机的大球，地平线 → 天顶插值 + 日轮 + 夜里的星与月。
- * 地平线附近退到雾色（uFog）：低俯角时画面最上缘越过远平面，露出的天穹要和被雾吞掉的远景地面无缝接上。
+ * 渐变天穹：一个跟随相机的大球。天顶 → 中段 → 地平线三段插值；夜里加卡通圆月（实心圆 + 柔光晕，无镜头光斑）与稀疏的星。
+ * 地平线以下退到雾色（uFog）：低俯角时画面上缘越过远平面，露出的天穹要和被雾吞掉的远景地面无缝接上。
+ * 天穹不过色调映射：雾也不过（three 在色调映射之后混雾），两者同为显示空间，地平线才对得上。
  */
 export class SkyDome {
   readonly mesh: THREE.Mesh;
@@ -157,9 +179,12 @@ export class SkyDome {
     this.mat = new THREE.ShaderMaterial({
       uniforms: {
         uTop: { value: new THREE.Color() },
+        uMid: { value: new THREE.Color() },
         uHorizon: { value: new THREE.Color() },
         uFog: { value: new THREE.Color() },
-        uSunColor: { value: new THREE.Color() },
+        uMoonDir: { value: MOON_DIR.clone() },
+        uMoon: { value: new THREE.Color(SKY.moon) },
+        uStar: { value: new THREE.Color(SKY.stars) },
         uSunDir: { value: new THREE.Vector3(0, 1, 0) },
         uNight: { value: 0 },
       },
@@ -168,13 +193,16 @@ varying vec3 vDir;
 void main() {
   vDir = normalize(position);
   vec4 p = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-  gl_Position = p.xyww; // 永远落在远平面上
+  gl_Position = p.xyww;
 }`,
       fragmentShader: /* glsl */ `
 uniform vec3 uTop;
+uniform vec3 uMid;
 uniform vec3 uHorizon;
 uniform vec3 uFog;
-uniform vec3 uSunColor;
+uniform vec3 uMoonDir;
+uniform vec3 uMoon;
+uniform vec3 uStar;
 uniform vec3 uSunDir;
 uniform float uNight;
 varying vec3 vDir;
@@ -182,24 +210,26 @@ float h21(vec2 p) { p = fract(p * vec2(234.34, 435.345)); p += dot(p, p + 34.23)
 void main() {
   vec3 d = normalize(vDir);
   float h = clamp(d.y, 0.0, 1.0);
-  vec3 col = mix(uHorizon, uTop, pow(h, 0.55));
-  col = mix(uFog, col, smoothstep(-0.02, 0.12, d.y));
+  vec3 col = mix(uHorizon, uMid, smoothstep(0.0, 0.22, h));
+  col = mix(col, uTop, smoothstep(0.18, 0.75, h));
+  col = mix(uFog, col, smoothstep(-0.02, 0.06, d.y));
   float sd = max(dot(d, normalize(uSunDir)), 0.0);
-  col += uSunColor * (pow(sd, 900.0) * 3.0 + pow(sd, 10.0) * 0.18) * (1.0 - uNight);
-  // 夜：月轮 + 稀疏的星。星点按方向格子哈希，不需要纹理
-  col += vec3(0.85, 0.88, 0.95) * pow(sd, 1600.0) * 2.0 * uNight;
-  vec2 g = floor(vec2(atan(d.z, d.x) * 120.0, d.y * 160.0));
-  float star = step(0.9965, h21(g)) * smoothstep(0.08, 0.3, d.y);
-  col += vec3(0.9, 0.88, 0.8) * star * uNight * 0.8;
+  col += vec3(1.0, 0.97, 0.88) * pow(sd, 24.0) * 0.18 * (1.0 - uNight);
+  float md = dot(d, normalize(uMoonDir));
+  float disc = smoothstep(0.99935, 0.99955, md);
+  float halo = pow(max(md, 0.0), 120.0) * 0.35;
+  col = mix(col, uMoon, disc * uNight);
+  col += uMoon * halo * uNight * (1.0 - disc);
+  vec2 g = floor(vec2(atan(d.z, d.x) * 90.0, d.y * 120.0));
+  float star = step(0.9955, h21(g)) * smoothstep(0.1, 0.35, d.y);
+  col += uStar * star * uNight * 0.9;
   gl_FragColor = vec4(col, 1.0);
-  #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }`,
       side: THREE.BackSide,
       depthWrite: false,
       depthTest: true,
       fog: false,
-      // 天穹不过色调映射与调色：雾也不过（three 在色调映射之后混雾），两者同为显示空间，地平线才对得上
       toneMapped: false,
     });
     this.mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 16), this.mat);
@@ -211,9 +241,9 @@ void main() {
   update(dn: DayNight, cameraPos: THREE.Vector3, radius: number): void {
     const u = this.mat.uniforms;
     (u.uTop.value as THREE.Color).copy(dn.skyTop);
+    (u.uMid.value as THREE.Color).copy(dn.skyMid);
     (u.uHorizon.value as THREE.Color).copy(dn.skyHorizon);
     (u.uFog.value as THREE.Color).copy(dn.fog);
-    (u.uSunColor.value as THREE.Color).copy(dn.lightColor);
     (u.uSunDir.value as THREE.Vector3).copy(dn.lightDir);
     u.uNight.value = dn.night;
     this.mesh.position.copy(cameraPos);

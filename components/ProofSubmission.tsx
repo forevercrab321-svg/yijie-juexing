@@ -1,7 +1,9 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
-import { X, Scan, Search, MapPinOff, Navigation } from 'lucide-react';
+import React, { useState, useEffect, useId, useMemo, useRef } from 'react';
+import { Camera, MapPinOff, Navigation, Search, X } from 'lucide-react';
 import { distanceMeters, PROOF_RADIUS_METERS } from '../lib/geo';
+import { UI_STRINGS, rememberedUiLang, type UiLang } from './world/ui/strings';
+import './world/ui/worldUi.css';
 
 interface ProofSubmissionProps {
   questLocation: [number, number];
@@ -10,6 +12,11 @@ interface ProofSubmissionProps {
   locationAccuracy: number | null;
   onConfirm: () => void;
   onCancel: () => void;
+  /**
+   * 界面语言（QA-R2-03：切到英文后这里原先仍是中文）。新增的可选字段，旧调用不受影响；
+   * 不传时沿用 TopHud / ActiveQuestHUD 最近一次收到的语言（strings.ts 的 rememberedUiLang）。
+   */
+  lang?: UiLang;
 }
 
 /** 精度差于这个值时，距离判定没有意义，要求用户到开阔处重试。 */
@@ -21,13 +28,19 @@ type Gate =
   | { kind: 'LOW_ACCURACY'; accuracy: number }
   | { kind: 'TOO_FAR'; distance: number };
 
+const isEditable = (el: EventTarget | null) =>
+  el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
+
 const ProofSubmission: React.FC<ProofSubmissionProps> = ({
   questLocation,
   userLocation,
   locationAccuracy,
   onConfirm,
   onCancel,
+  lang,
 }) => {
+  const t = UI_STRINGS[lang ?? rememberedUiLang()];
+  const titleId = useId();
   const [status, setStatus] = useState<'IDLE' | 'SCANNING' | 'ANALYZING' | 'GRADING' | 'SUCCESS'>('IDLE');
   const [preview, setPreview] = useState<string | null>(null);
 
@@ -90,157 +103,123 @@ const ProofSubmission: React.FC<ProofSubmissionProps> = ({
     }
   }, [status, onConfirm, gateOk]);
 
+  /*
+   * 打开时把焦点放到面板上：读屏先念标题，键盘玩家下一个 Tab 就是关闭 / 上传，不会还停在地图后面的按钮上。
+   * Esc 等同右上角的关闭（正在输入框里时不拦——上传控件本身就是 input，这里只认面板与按钮上的 Esc）。
+   */
+  const rootRef = useRef<HTMLDivElement>(null);
+  const cancelRef = useRef(onCancel);
+  cancelRef.current = onCancel;
+  useEffect(() => {
+    rootRef.current?.focus({ preventScroll: true });
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !e.defaultPrevented && !isEditable(e.target)) cancelRef.current();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const distText = (m: number) => t.meters(m);
   const blockedCopy: Record<Exclude<Gate['kind'], 'OK'>, { title: string; body: string }> = {
-    NO_LOCATION: {
-      title: '无法确认你的位置',
-      body: '提交任务证明需要定位权限。请在浏览器与系统设置中允许位置访问后重试。',
-    },
+    NO_LOCATION: { title: t.proofNoLocTitle, body: t.proofNoLocBody },
     LOW_ACCURACY: {
-      title: '定位精度不足',
-      body: `当前定位误差约 ${Math.round((gate as any).accuracy ?? 0)} 米，无法判定你是否到达现场。请移动到室外开阔处，等待信号稳定后重试。`,
+      title: t.proofLowAccTitle,
+      body: t.proofLowAccBody(Math.round(gate.kind === 'LOW_ACCURACY' ? gate.accuracy : 0)),
     },
     TOO_FAR: {
-      title: '你还没有到达现场',
-      body: `你距离任务点约 ${formatDistance((gate as any).distance ?? 0)}，需要进入 ${PROOF_RADIUS_METERS} 米范围内才能提交证明。`,
+      title: t.proofFarTitle,
+      body: t.proofFarBody(distText(gate.kind === 'TOO_FAR' ? gate.distance : 0), PROOF_RADIUS_METERS),
     },
   };
 
   return (
     /*
-      配色与文案（QA-R1-06）：原先是青色网格 + #22d3ee 扫描光 + PROOF_UPLOAD_PROTOCOL_V3 / Employer Neural Net 的赛博终端风，
-      正是简报列为反支柱的「赛博朋克青紫」。这些颜色都是写死的任意值或色板没定义的 cyan-950，重映射过的调色板管不到。
-      现在换成公会的语言：墨色底（不用纯黑）、金色网格与描边、羊皮纸色扫描光；结构与交互不变。
-      「雇主」一词也一并去掉——本平台明确是社区互助、不是雇佣平台（觉醒页的声明）。
+      可爱风格（style-cute.md）：整页晴空底（.cute-page），中间一张白色「相框」卡，主操作是一枚青色的大圆相机钮。
+      上一轮的墨色底、金色网格、全大写英文「AWAITING EVALUATION」一并去掉；「雇主」一词早已去掉——本平台是社区互助、不是雇佣平台。
+      根节点保留 fixed inset-0 z-[1100]：叠层顺序与上一版一致（高于聚焦卡片 1050，低于结算卡 1250）。
     */
-    <div className="fixed inset-0 z-[1100] bg-slate-950 flex flex-col items-center justify-center font-mono">
-      {/* 背景网格：金色细线，像契约纸上的格线 */}
-      <div className="absolute inset-0 pointer-events-none opacity-20"
-           style={{
-               backgroundImage: 'linear-gradient(0deg, transparent 24%, rgba(201, 169, 97, .3) 25%, rgba(201, 169, 97, .3) 26%, transparent 27%, transparent 74%, rgba(201, 169, 97, .3) 75%, rgba(201, 169, 97, .3) 76%, transparent 77%, transparent), linear-gradient(90deg, transparent 24%, rgba(201, 169, 97, .3) 25%, rgba(201, 169, 97, .3) 26%, transparent 27%, transparent 74%, rgba(201, 169, 97, .3) 75%, rgba(201, 169, 97, .3) 76%, transparent 77%, transparent)',
-               backgroundSize: '50px 50px'
-           }}
-      ></div>
+    <div
+      ref={rootRef}
+      tabIndex={-1}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      data-testid="proof-submission"
+      className="fixed inset-0 z-[1100] cute-root cute-page wui-proof flex flex-col items-center overflow-y-auto outline-none"
+    >
+      <header className="flex shrink-0 items-center gap-3 w-full max-w-lg min-h-[56px]">
+        <h2 id={titleId} className="flex-1 m-0 text-cute-xl">{t.proofTitle}</h2>
+        <button type="button" onClick={onCancel} className="cute-icon-btn" aria-label={t.proofCancel} title={t.proofCancel}>
+          <X strokeWidth={2.5} aria-hidden="true" />
+        </button>
+      </header>
 
-      {/* Top Bar */}
-      <div className="absolute top-0 left-0 right-0 p-4 flex justify-between items-center z-20">
-          <div className="text-[10px] text-amber-400 bg-amber-950/50 px-2 py-1 border border-amber-700/60 rounded tracking-widest">
-              委托证明 · PROOF OF DEED
-          </div>
-          <button onClick={onCancel} className="text-red-500 hover:text-red-400 p-2 border border-red-900/50 bg-red-950/20 rounded-full">
-              <X className="w-5 h-5" />
-          </button>
-      </div>
-
+      <div className="flex grow shrink-0 flex-col items-center justify-center gap-4 w-full py-2">
       {gate.kind !== 'OK' ? (
         /* --- 未通过到场校验：不提供上传入口 --- */
-        <div className="relative w-full max-w-sm mx-6 bg-slate-900/80 border border-amber-500/40 rounded-3xl p-8 text-center backdrop-blur-md">
-          <div className="w-16 h-16 mx-auto rounded-2xl bg-amber-950/50 border border-amber-500/30 flex items-center justify-center mb-5">
-            <MapPinOff className="w-8 h-8 text-amber-500" />
+        <div data-testid="proof-blocked" className="cute-panel cute-tone-warn w-full max-w-sm px-6 pt-7 pb-6 text-center">
+          <div className="wui-tint grid place-items-center w-16 h-16 mx-auto mb-4 rounded-full" aria-hidden="true">
+            <MapPinOff size={30} strokeWidth={2.5} />
           </div>
-          <h3 className="text-lg font-bold text-white font-['Cinzel'] tracking-wider mb-3">
-            {blockedCopy[gate.kind].title}
-          </h3>
-          <p className="text-xs text-slate-400 leading-relaxed mb-6 font-sans">
-            {blockedCopy[gate.kind].body}
-          </p>
+          <h3 className="mt-0 mb-2 text-cute-xl">{blockedCopy[gate.kind].title}</h3>
+          <p className="mt-0 mb-5 text-cute-body text-cute-ink-2">{blockedCopy[gate.kind].body}</p>
           {/* 扫描途中被拦：照片还在，回到现场会接着评定，不用重拍 */}
           {status !== 'IDLE' && (
-            <p data-testid="proof-paused" className="text-[11px] text-amber-400/90 leading-relaxed -mt-3 mb-6 font-sans">
-              证明评定已暂停，回到现场后会自动继续。
-            </p>
+            <p data-testid="proof-paused" className="-mt-2 mb-5 text-cute-sm font-extrabold text-cute-warn-600">{t.proofPaused}</p>
           )}
-          <button
-            onClick={onCancel}
-            className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold py-3 rounded-xl transition-colors active:scale-95 font-sans"
-          >
-            返回
+          <button type="button" onClick={onCancel} className="cute-btn cute-btn-secondary cute-btn-block">
+            {t.proofBack}
           </button>
         </div>
       ) : (
       <>
-      {/* Main Scanner UI */}
-      <div className="relative w-full max-w-sm aspect-[3/4] border-2 border-slate-800 bg-slate-900/40 rounded-3xl overflow-hidden flex flex-col items-center justify-center p-1">
-         {/* Corner Brackets */}
-         <div className="absolute top-4 left-4 w-8 h-8 border-t-2 border-l-2 border-amber-500/70"></div>
-         <div className="absolute top-4 right-4 w-8 h-8 border-t-2 border-r-2 border-amber-500/70"></div>
-         <div className="absolute bottom-4 left-4 w-8 h-8 border-b-2 border-l-2 border-amber-500/70"></div>
-         <div className="absolute bottom-4 right-4 w-8 h-8 border-b-2 border-r-2 border-amber-500/70"></div>
+      <div className="wui-frame">
+         {preview && <img src={preview} alt="" />}
 
-         {/* Image Preview Layer */}
-         {preview && (
-             <img
-                src={preview}
-                className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-500 ${status === 'SUCCESS' ? 'opacity-100' : 'opacity-60 grayscale'}`}
-                alt="Scan"
-             />
-         )}
-
-         {/* Scanning Overlay Animation */}
+         {/* 扫描：一道青色的光从上到下扫过照片；减少动态效果时光条不动，只看下面的状态字 */}
          {(status === 'SCANNING' || status === 'ANALYZING') && (
-            <div className="absolute inset-0 bg-amber-500/10 z-10">
-                <div className="absolute top-0 left-0 right-0 h-1 bg-amber-200 shadow-[0_0_15px_rgba(232,207,148,0.75)] animate-[scan_2s_ease-in-out_infinite]"></div>
-                <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="w-48 h-48 border border-amber-500/30 rounded-full animate-[spin_4s_linear_infinite] border-t-amber-300 border-t-2"></div>
-                </div>
+            <div className="wui-scan absolute inset-0 z-[1]" data-testid="proof-scanning">
+                <i />
+                <span className="absolute inset-x-0 bottom-7 flex justify-center">
+                  {status === 'SCANNING'
+                    ? <span className="cute-chip cute-tone-teal">{t.proofScanning}</span>
+                    : <span className="cute-chip cute-tone-success">{t.proofAnalyzing}</span>}
+                </span>
             </div>
          )}
 
-         {/* Grading Overlay */}
          {status === 'GRADING' && (
-             <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm z-20 flex flex-col items-center justify-center animate-in fade-in">
-                 <div className="text-amber-500 animate-pulse mb-4">
-                     <Search className="w-12 h-12" />
-                 </div>
-                 <div className="text-amber-500 font-bold tracking-[0.3em] text-lg font-['Cinzel']">AWAITING EVALUATION</div>
-                 <div className="text-xs text-slate-400 mt-2 font-sans">公会书记官正在登记这份委托…</div>
+             <div className="wui-grade absolute inset-0 z-[2] flex flex-col items-center justify-center gap-1.5 p-6 text-center" role="status">
+                 <div className="grid place-items-center w-[72px] h-[72px] mb-2 rounded-full bg-cute-sky-50 text-cute-sky-600" aria-hidden="true"><Search size={32} strokeWidth={2.5} /></div>
+                 <b className="font-cute-display text-cute-xl">{t.proofGradingTitle}</b>
+                 <span className="text-cute-sm text-cute-ink-2">{t.proofGradingBody}</span>
              </div>
          )}
 
-         {/* IDLE State / Input Trigger */}
          {status === 'IDLE' && (
-             <label className="group relative w-40 h-40 rounded-full border-2 border-dashed border-slate-600 flex items-center justify-center cursor-pointer hover:border-amber-500 hover:bg-amber-950/30 transition-all z-10 active:scale-95">
-                 {/* capture 让移动端直接调起相机，减少「翻相册里的旧图」这一最简单的作弊路径 */}
-                 <input type="file" accept="image/*" capture="environment" onChange={handleFileChange} className="hidden" />
-                 <div className="w-32 h-32 rounded-full bg-slate-800 flex items-center justify-center group-hover:shadow-[0_0_30px_rgba(201,169,97,0.3)] transition-shadow">
-                    <Scan className="w-10 h-10 text-slate-400 group-hover:text-amber-400 transition-colors" />
-                 </div>
-                 <div className="absolute -bottom-10 text-center w-full">
-                     <div className="text-amber-400 font-bold tracking-widest text-sm animate-pulse font-sans">上传现场照片</div>
-                 </div>
+             <label className="wui-cam relative z-[1] flex flex-col items-center gap-3 max-w-[80%] text-center cursor-pointer">
+                 {/*
+                   capture 让移动端直接调起相机，减少「翻相册里的旧图」这一最简单的作弊路径。
+                   input 只做视觉隐藏（不是 display:none）：键盘玩家仍能 Tab 到它、按空格打开相机，焦点环画在圆钮上。
+                 */}
+                 <input type="file" accept="image/*" capture="environment" onChange={handleFileChange} className="wui-sr" />
+                 <span className="wui-cam-disc grid place-items-center w-32 h-32 border-4 rounded-full text-white" aria-hidden="true"><Camera size={44} strokeWidth={2.25} /></span>
+                 <b className="text-cute-lg text-cute-teal-600">{t.proofUpload}</b>
+                 <span className="text-cute-sm text-cute-ink-3">{t.proofUploadHint}</span>
              </label>
-         )}
-
-         {/* Status Text HUD */}
-         {status !== 'GRADING' && status !== 'IDLE' && (
-            <div className="absolute bottom-12 left-0 right-0 text-center z-10">
-                {status === 'SCANNING' && <div className="text-xs text-amber-300 font-bold bg-slate-950/60 inline-block px-3 py-1 rounded border border-amber-800 font-sans">正在核对现场位置…</div>}
-                {status === 'ANALYZING' && <div className="text-xs text-emerald-400 font-bold bg-slate-950/60 inline-block px-3 py-1 rounded border border-emerald-900 font-sans">正在核对照片内容…</div>}
-            </div>
          )}
       </div>
 
       {/* 到场确认条 */}
-      <div className="mt-16 flex items-center gap-2 text-[11px] text-emerald-400 bg-emerald-900/40 border border-emerald-500/30 px-3 py-1.5 rounded-full">
-        <Navigation className="w-3 h-3" />
-        <span className="font-sans">已确认到场 · 距任务点 {formatDistance(gate.distance)}</span>
-      </div>
+      <p className="cute-chip cute-tone-success h-auto min-h-[34px] m-0 px-3.5 py-1.5 leading-5 whitespace-normal text-center">
+        <Navigation strokeWidth={2.5} aria-hidden="true" />
+        <span>{t.proofArrived(distText(gate.distance))}</span>
+      </p>
       </>
       )}
-
-      <style>{`
-        @keyframes scan {
-            0% { top: 0%; opacity: 0; }
-            10% { opacity: 1; }
-            90% { opacity: 1; }
-            100% { top: 100%; opacity: 0; }
-        }
-      `}</style>
+      </div>
     </div>
   );
 };
-
-function formatDistance(meters: number): string {
-  return meters >= 1000 ? `${(meters / 1000).toFixed(1)} 公里` : `${Math.round(meters)} 米`;
-}
 
 export default ProofSubmission;

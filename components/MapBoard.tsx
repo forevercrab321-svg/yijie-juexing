@@ -1,11 +1,16 @@
-
-import React, { useEffect } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline, CircleMarker } from 'react-leaflet';
+import React, { useEffect, useMemo } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline, Circle } from 'react-leaflet';
 import { DivIcon, LatLngBounds } from 'leaflet';
+import { Coins, Lock, CircleCheck, MapPin, ShieldCheck } from 'lucide-react';
 import { Quest } from '../types';
+import { QUEST_ICON, QUEST_TONE, toneClass, type QuestTone } from './world/ui/questVisual';
 // 原先从 unpkg 加载。leaflet 本来就是 npm 依赖，样式随组件打包，不再依赖第三方 CDN
 import 'leaflet/dist/leaflet.css';
 
+/**
+ * 2D 回退地图（Leaflet）。3D 不可用或玩家手动切到 2D 时用它，所以它必须和 3D 世界「是同一张地图」：
+ * 明亮的草绿与水蓝底图、同形同色的委托图钉、青色流动虚线路径（风格指南第 6 节）。
+ */
 interface MapBoardProps {
   quests: Quest[];
   activeQuestId: string | null;
@@ -13,33 +18,89 @@ interface MapBoardProps {
   onFocus: (quest: Quest) => void;
   onAccept: (quest: Quest) => void;
   userLocation: [number, number] | null;
+  /** 可选：已完成的委托。传了之后图钉换灰蓝 + 勾，弹窗写明原因（与 3D 徽章的「已完成」一致） */
+  completedQuestIds?: string[];
+  /** 可选：玩家等级。传了之后等级不足的图钉换灰蓝 + 锁 */
+  userLevel?: number;
+  /** 可选：玩家头像。传了之后位置标记是头像贴纸，否则是青色圆点 */
+  userAvatarUrl?: string;
+  /** 可选：定位精度（米）。传了之后画精度圈 */
+  userAccuracy?: number | null;
 }
 
-const createCustomIcon = (type: string, isTarget: boolean, isFocused: boolean) => {
-  const gold = '#D4AF37'; 
-  const scale = isFocused ? 'scale(1.4)' : 'scale(1.0)';
-  
-  const html = `
-    <div style="position: relative; width: 50px; height: 70px; display: flex; align-items: center; justify-content: center; transform: ${scale}; transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);">
-      <div style="position: absolute; bottom: 10px; width: 30px; height: 12px; border: 1px solid ${gold}; border-radius: 50%; background: radial-gradient(circle, ${gold}44 0%, transparent 70%);"></div>
-      <div style="position: absolute; bottom: 15px; width: 6px; height: 40px; background: linear-gradient(to top, ${gold}dd, transparent); border-radius: 3px; box-shadow: 0 0 15px ${gold}88;"></div>
-      <div style="position: absolute; top: 0; width: 18px; height: 18px; background: ${gold}; transform: rotate(45deg); border: 2px solid #000; box-shadow: 0 0 10px ${gold}; display: flex; align-items: center; justify-content: center; animation: marker-float 2s ease-in-out infinite;">
-        <div style="transform: rotate(-45deg); font-size: 10px;">
-           ${type === '物资运输' ? '📦' : type === '魔物讨伐' ? '⚔️' : type === '迷宫建设' ? '🏗️' : '📜'}
-        </div>
-      </div>
-    </div>
-  `;
-  
-  return new DivIcon({
-    html: html,
-    className: 'custom-gold-marker',
-    iconSize: [50, 70],
-    iconAnchor: [25, 60] 
-  });
+/** 五种外形与 3D 徽章一致（指南 5.5）。没有方形：方块立在柱上是补给站的结构（IP 红线） */
+const PIN_SHAPE: Record<QuestTone, string> = {
+  transport: 'scallop',
+  hunt: 'shield',
+  build: 'hex',
+  envoy: 'bubble',
+  rescue: 'cross',
 };
 
-const MapController: React.FC<{ 
+/*
+  divIcon 只收 HTML 字符串，React 组件放不进去，所以把要用的 lucide 图标（lucide-react 0.556，ISC 许可）
+  的路径抄成字符串。与界面上同名图标完全相同：Package / Swords / Hammer / MessageCircleHeart / HeartPulse / Check / Lock。
+*/
+const svg = (inner: string) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
+const PIN_ICON: Record<QuestTone | 'done' | 'locked', string> = {
+  transport: svg('<path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z"/><path d="M12 22V12"/><polyline points="3.29 7 12 12 20.71 7"/><path d="m7.5 4.27 9 5.15"/>'),
+  hunt: svg('<polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5"/><line x1="13" x2="19" y1="19" y2="13"/><line x1="16" x2="20" y1="16" y2="20"/><line x1="19" x2="21" y1="21" y2="19"/><polyline points="14.5 6.5 18 3 21 3 21 6 17.5 9.5"/><line x1="5" x2="9" y1="14" y2="18"/><line x1="7" x2="4" y1="17" y2="20"/><line x1="3" x2="5" y1="19" y2="21"/>'),
+  build: svg('<path d="m15 12-9.373 9.373a1 1 0 0 1-3.001-3L12 9"/><path d="m18 15 4-4"/><path d="m21.5 11.5-1.914-1.914A2 2 0 0 1 19 8.172v-.344a2 2 0 0 0-.586-1.414l-1.657-1.657A6 6 0 0 0 12.516 3H9l1.243 1.243A6 6 0 0 1 12 8.485V10l2 2h1.172a2 2 0 0 1 1.414.586L18.5 14.5"/>'),
+  envoy: svg('<path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"/><path d="M7.828 13.07A3 3 0 0 1 12 8.764a3 3 0 0 1 5.004 2.224 3 3 0 0 1-.832 2.083l-3.447 3.62a1 1 0 0 1-1.45-.001z"/>'),
+  rescue: svg('<path d="M2 9.5a5.5 5.5 0 0 1 9.591-3.676.56.56 0 0 0 .818 0A5.49 5.49 0 0 1 22 9.5c0 2.29-1.5 4-3 5.5l-5.492 5.313a2 2 0 0 1-3 .019L5 15c-1.5-1.5-3-3.2-3-5.5"/><path d="M3.22 13H9.5l.5-1 2 4.5 2-7 1.5 3.5h5.27"/>'),
+  done: svg('<path d="M20 6 9 17l-5-5"/>'),
+  locked: svg('<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>'),
+};
+
+type PinState = 'default' | 'focused' | 'active' | 'done' | 'locked';
+
+/*
+  图标按「类型 + 状态 + 紧急」缓存：每次渲染都 new 一个 DivIcon，react-leaflet 会对每个图钉调用 setIcon，
+  整组图钉的 DOM 被反复替换，弹窗打开时还会闪一下。
+  cute-pin 写在 html 里面而不是 divIcon 的 className 上：Leaflet 用 transform 给图标容器定位，
+  聚焦态的 scale 若落在同一个元素上会把定位覆盖掉、图钉飞到地图左上角（index.css 注释）。
+*/
+const iconCache = new Map<string, DivIcon>();
+function pinIcon(tone: QuestTone, state: PinState, urgent: boolean): DivIcon {
+  const key = `${tone}|${state}|${urgent}`;
+  const hit = iconCache.get(key);
+  if (hit) return hit;
+  const grey = state === 'done' || state === 'locked';
+  const pinState = grey ? ` is-${state}` : state === 'focused' ? ' is-focused' : '';
+  const glyph = state === 'done' ? PIN_ICON.done : state === 'locked' ? PIN_ICON.locked : PIN_ICON[tone];
+  const html =
+    `<div class="mb-marker cute-tone-${tone}${state === 'active' ? ' is-active' : ''}${grey ? ' is-grey' : ''}">` +
+    '<span class="mb-ground"></span>' +
+    `<div class="cute-pin cute-pin-${PIN_SHAPE[tone]}${pinState}"><span class="cute-pin-core">${glyph}</span>` +
+    // 紧急不只靠颜色：与 3D 徽章头顶同一个「!」；做完了就不再催
+    (urgent && state !== 'done' ? '<span class="cute-badge-bang">!</span>' : '') +
+    '</div></div>';
+  const icon = new DivIcon({
+    html,
+    className: 'mb-icon',
+    iconSize: [44, 44],
+    // 锚点在图钉底部正中：底边就是委托所在的那一点
+    iconAnchor: [22, 44],
+    popupAnchor: [0, -46],
+  });
+  iconCache.set(key, icon);
+  return icon;
+}
+
+const escapeAttr = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+function meIcon(avatarUrl?: string): DivIcon {
+  const inner = avatarUrl
+    ? `<img class="cute-avatar mb-me-ava" src="${escapeAttr(avatarUrl)}" alt="" draggable="false">`
+    : '<span class="mb-me-dot"></span>';
+  return new DivIcon({ html: `<div class="mb-me"><span class="mb-me-ring"></span>${inner}</div>`, className: 'mb-icon', iconSize: [40, 40], iconAnchor: [20, 20] });
+}
+
+const prefersReducedMotion = () =>
+  typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const MapController: React.FC<{
     destination: [number, number] | null;
     activeQuestLocation: [number, number] | null;
     userLocation: [number, number] | null;
@@ -64,166 +125,202 @@ const MapController: React.FC<{
   }, [map]);
 
   useEffect(() => {
+    // 减少动效时不飞行，直接切过去（指南 3.8：相机飞行改为直接切换）
+    const still = prefersReducedMotion();
     if (activeQuestLocation && userLocation) {
         const bounds = new LatLngBounds(userLocation, activeQuestLocation);
-        map.flyToBounds(bounds, { padding: [120, 120], duration: 1.5 });
+        if (still) map.fitBounds(bounds, { padding: [120, 120], animate: false });
+        else map.flyToBounds(bounds, { padding: [120, 120], duration: 1.5 });
     } else if (destination) {
-      map.flyTo(destination, 16, { duration: 1.2 });
+      if (still) map.setView(destination, 16, { animate: false });
+      else map.flyTo(destination, 16, { duration: 1.2 });
     }
   }, [destination, activeQuestLocation, userLocation, map]);
   return null;
 };
 
-const MapBoard: React.FC<MapBoardProps> = ({ quests, activeQuestId, focusedQuestId, onFocus, onAccept, userLocation }) => {
-  const centerPosition: [number, number] = [40.7580, -73.9855]; 
+/*
+  组件样式。只覆盖 Leaflet 自带的皮与图钉的少量附件，前缀 mb-；图钉本体用 index.css 的 .cute-pin 原语。
+  瓦片滤镜按指南第 6 节：去掉上一版的 sepia 做旧，读成明亮的草绿与水蓝。
+  地图底色用指南给的晴空色 #EAF7FF（与 3D 的雾色相同）：瓦片没加载出来时是一片晴空，而不是全局规则里的深色。
+*/
+const MAP_CSS = `
+.mb-map.leaflet-container { background: #EAF7FF; font-family: var(--cute-font); }
+.mb-map .leaflet-tile-pane { filter: saturate(1.35) brightness(1.04) contrast(0.96) hue-rotate(-6deg); }
+.mb-labels { pointer-events: none; }
+.mb-icon { background: none; border: 0; }
+.mb-icon:focus { outline: none; }
+.mb-marker { position: relative; width: 44px; height: 44px; }
+.mb-marker .cute-pin { transform-origin: 50% 100%; transition: transform var(--cute-dur-base) var(--cute-ease-spring); }
+.mb-ground { position: absolute; left: 50%; bottom: -6px; width: 24px; height: 10px; margin-left: -12px; border-radius: 50%; background: var(--tone-400); opacity: .45; box-shadow: 0 0 0 4px rgba(255, 255, 255, .45); }
+.mb-marker.is-grey .mb-ground { background: rgba(31, 45, 68, .2); box-shadow: none; }
+.mb-marker.is-active .mb-ground { width: 34px; height: 14px; margin-left: -17px; bottom: -8px; opacity: 1; background: rgba(44, 197, 176, .18); border: 2px dashed var(--cute-teal-400); box-shadow: none; }
+.mb-icon:focus-visible .mb-marker::after { content: ''; position: absolute; inset: -5px; border-radius: 50%; box-shadow: var(--cute-focus-ring); }
+.mb-me { position: relative; width: 40px; height: 40px; display: grid; place-items: center; }
+.mb-me-dot { width: 20px; height: 20px; border-radius: 50%; background: var(--cute-teal-600); border: 3px solid #fff; box-shadow: var(--cute-shadow-float); }
+.mb-me-ava { width: 36px; height: 36px; }
+.mb-me-ring { position: absolute; inset: 0; border-radius: 50%; background: var(--cute-teal-400); opacity: .35; animation: cute-pulse-ring 2.4s ease-out infinite; }
+.mb-acc { fill: var(--cute-teal-400); fill-opacity: .14; stroke: #fff; stroke-width: 2; }
+.mb-route-base { stroke: #fff; }
+.mb-route { stroke: var(--cute-teal-400); animation: mb-flow .45s linear infinite; }
+@keyframes mb-flow { to { stroke-dashoffset: -18; } }
+.mb-map .leaflet-popup-content-wrapper { padding: 0; border-radius: var(--cute-r-card); background: transparent; box-shadow: var(--cute-shadow-3); }
+.mb-map .leaflet-popup-content { margin: 0; line-height: 1.5; font-size: var(--cute-fs-body); }
+.mb-map .leaflet-popup-content p { margin: 0; }
+.mb-map .leaflet-popup-tip { background: var(--cute-panel); box-shadow: var(--cute-shadow-1); }
+.mb-pop .cute-card-head { min-height: 56px; padding-top: 8px; padding-bottom: 8px; }
+.mb-pop .cute-card-head .cute-chip.mb-urgent { padding-left: 3px; color: var(--cute-coral-600); }
+.mb-clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+@media (prefers-reduced-motion: reduce) {
+  .mb-marker .cute-pin { transition: none; }
+  .mb-me-ring, .mb-route { animation: none; }
+}
+`;
+
+const MapBoard: React.FC<MapBoardProps> = ({
+  quests, activeQuestId, focusedQuestId, onFocus, onAccept, userLocation,
+  completedQuestIds, userLevel, userAvatarUrl, userAccuracy,
+}) => {
+  const centerPosition: [number, number] = [40.7580, -73.9855];
   const activeQuest = quests.find(q => q.id === activeQuestId);
   const targetQuest = quests.find(q => q.id === (focusedQuestId || activeQuestId));
+  const me = useMemo(() => meIcon(userAvatarUrl), [userAvatarUrl]);
+
+  /** 图钉状态的优先级与 3D 徽章一致：进行中 → 已完成 → 等级不足 → 聚焦 → 默认 */
+  const pinState = (q: Quest): PinState => {
+    if (q.id === activeQuestId) return 'active';
+    if (completedQuestIds?.includes(q.id)) return 'done';
+    if (typeof userLevel === 'number' && userLevel < q.minLevel) return 'locked';
+    if (q.id === focusedQuestId) return 'focused';
+    return 'default';
+  };
 
   return (
-    <div className="absolute inset-0 w-full h-full z-0 overflow-hidden" style={{ background: '#d9cbb0' }}>
-      <style>{`
-        /*
-          把 CartoDB 的灰白街道图调成羊皮纸地形图。
-          sepia 是关键——它把整张图收成单一暖色系，是"手绘地图"观感的来源；
-          单纯降饱和只会得到灰扑扑的照片，不会有纸的感觉。
-        */
-        /*
-          contrast 要给足。sepia 会显著压低对比，如果不补回来，
-          街道线条会糊成一片米黄——好看但没法用，地图首先得能读。
-        */
-        .aethel-map .leaflet-tile-pane {
-           filter: sepia(0.82) saturate(0.65) hue-rotate(-10deg) brightness(0.82) contrast(1.45);
-        }
+    <div className="absolute inset-0 w-full h-full z-0 overflow-hidden" style={{ background: '#EAF7FF' }}>
+      <style>{MAP_CSS}</style>
 
-        /*
-          街道标签压到几乎只剩痕迹。
-          地图是背景不是主角——密集的街道名一旦读得清，画面立刻回到导航软件。
-          留一点点是为了需要时还能辨认方位，不是为了阅读。
-        */
-        .map-labels-layer {
-           filter: sepia(1) saturate(0.45) brightness(0.7) contrast(0.9);
-           pointer-events: none;
-           z-index: 400;
-        }
+      <MapContainer center={centerPosition} zoom={15} className="w-full h-full mb-map aethel-map" zoomControl={false}>
+        {/*
+          Carto Voyager 栅格：与上一版同一个 basemaps.cartocdn.com 主机，不新增域名、不新增数据采集。
+          Voyager 的绿地与水面本身有颜色，配合滤镜才读得出「草绿 + 水蓝」；Positron（light）是灰白的，滤镜也救不回来。
+        */}
+        <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png" />
 
-        /* 海面与空白区。默认的冷灰会破坏暖色统一 */
-        .aethel-map.leaflet-container { background: #d9cbb0; }
-
-        /* 纸纹。压掉瓦片的数字平整感 */
-        .map-paper-grain {
-            position: absolute;
-            inset: 0;
-            pointer-events: none;
-            z-index: 500;
-            opacity: 0.09;
-            mix-blend-mode: multiply;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='5'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23g)'/%3E%3C/svg%3E");
-        }
-
-        /*
-          两层叠加：
-          先铺一层暖褐把整幅图压进同一个色温（乘法混合，保留纹理），
-          再用暗角收边。只做暗角的话中心会显得发白、缺层次。
-        */
-        .map-warm-wash {
-            position: absolute;
-            inset: 0;
-            pointer-events: none;
-            z-index: 499;
-            mix-blend-mode: multiply;
-            background: linear-gradient(170deg, #e0cfa8 0%, #d2bd94 55%, #c2aa82 100%);
-            opacity: 0.22;
-        }
-
-        .map-vignette {
-            position: absolute;
-            inset: 0;
-            pointer-events: none;
-            z-index: 501;
-            background:
-              radial-gradient(ellipse at 50% 45%, transparent 30%, rgba(58, 44, 28, 0.34) 70%, rgba(30, 22, 14, 0.72) 100%);
-        }
-
-        @keyframes marker-float {
-          0%, 100% { transform: translateY(0px) rotate(45deg); }
-          50% { transform: translateY(-8px) rotate(45deg); }
-        }
-
-        .leaflet-popup-content-wrapper { background: transparent !important; box-shadow: none !important; padding: 0 !important; }
-        .leaflet-popup-tip { display: none; }
-      `}</style>
-
-      <MapContainer center={centerPosition} zoom={15} className="w-full h-full aethel-map" zoomControl={false}>
-        {/* 使用更清晰的底圖服務 */}
-        <TileLayer url="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png" />
-        
         {/*
           街道标签层。
           opacity 必须走 TileLayer 的 prop——Leaflet 会给图层写内联 opacity，
           CSS class 里的 opacity 会被内联样式压过去，改了也没反应。
         */}
         <TileLayer
-          url="https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png"
-          className="map-labels-layer"
-          opacity={0.42}
+          url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}{r}.png"
+          className="mb-labels"
+          opacity={0.7}
         />
 
-        <MapController 
-            destination={targetQuest ? targetQuest.location : null} 
+        <MapController
+            destination={targetQuest ? targetQuest.location : null}
             activeQuestLocation={activeQuest ? activeQuest.location : null}
             userLocation={userLocation}
         />
-        
+
+        {/* 进行中路径：白色衬底 + 青色流动虚线，与 3D 的路径同一种画法 */}
         {activeQuest && userLocation && (
-            <Polyline 
-                positions={[userLocation, activeQuest.location]}
-                pathOptions={{ color: '#D4AF37', weight: 3, opacity: 0.6, dashArray: '12, 12' }}
+          <>
+            <Polyline
+              positions={[userLocation, activeQuest.location]}
+              interactive={false}
+              pathOptions={{ className: 'mb-route-base', color: '#fff', weight: 10, opacity: 1, lineCap: 'round' }}
             />
+            <Polyline
+              positions={[userLocation, activeQuest.location]}
+              interactive={false}
+              pathOptions={{ className: 'mb-route', color: '#2CC5B0', weight: 6, opacity: 1, dashArray: '10 8', lineCap: 'butt' }}
+            />
+          </>
         )}
 
+        {userLocation && typeof userAccuracy === 'number' && userAccuracy > 0 && (
+          <Circle center={userLocation} radius={userAccuracy} interactive={false} pathOptions={{ className: 'mb-acc' }} />
+        )}
         {userLocation && (
-            <CircleMarker 
-                center={userLocation} 
-                radius={10} 
-                pathOptions={{ color: '#fff', fillColor: '#D4AF37', fillOpacity: 1, weight: 4 }} 
-            />
+          <Marker position={userLocation} icon={me} interactive={false} keyboard={false} zIndexOffset={-1000} />
         )}
-        
-        {quests.map((quest) => (
-          <Marker 
-            key={quest.id} 
-            position={quest.location}
-            icon={createCustomIcon(quest.type, quest.id === activeQuestId, quest.id === focusedQuestId)}
-            eventHandlers={{ click: () => onFocus(quest) }}
-          >
-            <Popup closeButton={false} maxWidth={280}>
-              <div className="bg-[#020617]/95 border border-[#D4AF37]/60 rounded-2xl p-5 shadow-[0_15px_40px_rgba(0,0,0,0.9)] backdrop-blur-md flex flex-col gap-4">
-                <div>
-                  <div className="text-[10px] text-[#D4AF37] font-bold uppercase tracking-[0.3em] mb-1">{quest.type}</div>
-                  <h3 className="text-base font-bold text-white font-['Cinzel'] tracking-wider leading-tight">{quest.title}</h3>
-                </div>
-                <div className="text-[11px] text-slate-300 leading-relaxed font-serif italic border-l border-[#D4AF37]/30 pl-3">"{quest.description}"</div>
-                <div className="flex items-center justify-between border-t border-white/10 pt-3">
-                   <div className="text-[10px] text-emerald-400 font-bold font-mono tracking-widest">TRUST +{quest.trustPoints}P</div>
-                   {quest.id !== activeQuestId && (
-                        <button 
-                            onClick={(e) => { e.stopPropagation(); onAccept(quest); }}
-                            className="bg-[#D4AF37] text-black text-[10px] font-black px-4 py-2 rounded-lg shadow-lg active:scale-95 transition-all uppercase tracking-widest hover:bg-white"
-                        >
-                            承接契約
-                        </button>
-                    )}
-                </div>
-              </div>
-            </Popup>
-          </Marker>
-        ))}
-      </MapContainer>
 
-      {/* 覆盖层放在地图之后，顺序即叠加顺序：暖色统一 → 纸纹去数字感 → 暗角收边 */}
-      <div className="map-warm-wash" />
-      <div className="map-paper-grain" />
-      <div className="map-vignette" />
+        {quests.map((quest) => {
+          const state = pinState(quest);
+          const tone = QUEST_TONE[quest.type] ?? 'transport';
+          const TypeIcon = QUEST_ICON[quest.type] ?? MapPin;
+          const done = state === 'done';
+          const locked = state === 'locked';
+          const reason = done
+            ? '你已完成这个委托，同一委托不会重复发放报酬。'
+            : locked ? `等级不足：需要 Lv${quest.minLevel}，你现在 Lv${userLevel}。` : null;
+          return (
+            <Marker
+              key={quest.id}
+              position={quest.location}
+              icon={pinIcon(tone, state, !!quest.isUrgent)}
+              title={quest.title}
+              zIndexOffset={state === 'focused' ? 1000 : state === 'active' ? 500 : 0}
+              eventHandlers={{ click: () => onFocus(quest) }}
+            >
+              <Popup
+                closeButton={false}
+                minWidth={264}
+                maxWidth={280}
+                // 顶部留出 TopHud、底部留出世界控件与公会徽章，自动平移时弹窗不会钻到它们底下
+                autoPanPaddingTopLeft={[16, 128]}
+                autoPanPaddingBottomRight={[16, 136]}
+              >
+                <div className={`cute-root cute-card mb-pop ${toneClass(quest.type)}${done ? ' is-done' : locked ? ' is-locked' : ''}`} data-testid="map-popup" data-quest-id={quest.id}>
+                  <div className="cute-card-head gap-2.5">
+                    <span className="cute-card-medal" aria-hidden="true"><TypeIcon strokeWidth={2.5} /></span>
+                    <div className="flex min-w-0 flex-1 flex-wrap gap-1.5">
+                      <span className="cute-chip">{quest.type}</span>
+                      {quest.isUrgent && !done && (
+                        <span className="cute-chip mb-urgent gap-1.5"><span className="cute-badge-bang" aria-hidden="true">!</span>紧急</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-2 px-4 py-3">
+                    <h3 className="m-0 text-cute-lg text-cute-ink [overflow-wrap:anywhere]">{quest.title}</h3>
+                    <p className="mb-clamp text-cute-sm font-semibold text-cute-ink-2">{quest.description}</p>
+                    <p className="flex items-center gap-1 text-cute-sm text-cute-ink-3">
+                      <MapPin size={16} strokeWidth={2.5} className="shrink-0" aria-hidden="true" />{quest.locationName}
+                    </p>
+                    {reason && (
+                      <p className={`flex items-start gap-2 rounded-cute-sm px-3 py-2 text-cute-sm font-extrabold ${done ? 'cute-tone-success' : 'cute-tone-warn'} bg-[var(--tone-50)] text-[color:var(--tone-600)]`}>
+                        {done ? <CircleCheck size={16} strokeWidth={2.5} className="mt-0.5 shrink-0" aria-hidden="true" /> : <Lock size={16} strokeWidth={2.5} className="mt-0.5 shrink-0" aria-hidden="true" />}
+                        <span>{reason}</span>
+                      </p>
+                    )}
+                  </div>
+                  {/* 弹窗只有 264–280px 宽：报酬用小号标签，放不下时按钮折到下一行，而不是撑出卡片 */}
+                  <div className="cute-card-foot flex-wrap gap-2">
+                    <span className="cute-chip cute-chip-sm cute-num cute-tone-success" title="信任"><ShieldCheck strokeWidth={2.5} aria-hidden="true" />+{quest.trustPoints}</span>
+                    <span className="cute-chip cute-chip-sm cute-num cute-tone-sun" title="金币"><Coins strokeWidth={2.5} aria-hidden="true" />+{quest.rewardGold}</span>
+                    {quest.id !== activeQuestId ? (
+                      // 接取只回调 onAccept → App 的 handleAccept（艾琳娜确认、等级与已完成的兜底都在那里）。
+                      // 已完成 / 等级不足时按钮仍可点：2D 没有聚焦卡片，App 会用告知条说明原因
+                      <button
+                        type="button"
+                        data-testid="map-popup-accept"
+                        data-blocked={reason ? 'true' : 'false'}
+                        onClick={(e) => { e.stopPropagation(); onAccept(quest); }}
+                        className="cute-btn cute-btn-primary ml-auto min-h-[44px] rounded-cute-md px-4 text-cute-body"
+                      >
+                        承接契约
+                      </button>
+                    ) : (
+                      <span className="cute-chip cute-tone-teal ml-auto"><MapPin strokeWidth={2.5} aria-hidden="true" />进行中</span>
+                    )}
+                  </div>
+                </div>
+              </Popup>
+            </Marker>
+          );
+        })}
+      </MapContainer>
     </div>
   );
 };

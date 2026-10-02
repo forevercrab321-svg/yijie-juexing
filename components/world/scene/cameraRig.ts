@@ -1,10 +1,15 @@
 /**
- * Pokémon GO 式轨道相机。
+ * GO 式低视角轨道相机（指南 5.8）。
  *
  * 状态 = 焦点 target（地面上的点）+ 距离 distance（即调试里的 camera.zoom，单位米）
- *       + 俯仰 tilt（相机视线相对地平面的俯角，35°–70°，越大越接近正俯视）+ 航向 heading（0 = 正北朝上，顺时针为正）。
+ *       + 俯仰 tilt（相机视线相对地平面的俯角，20°–70°，越大越接近正俯视）+ 航向 heading（0 = 正北朝上，顺时针为正）。
  *
- * 总览：缩到最远时焦点平滑移到全部委托的中心、俯仰抬到 70°，保证任何航向下所有光柱都在屏幕里——
+ * 构图点：焦点（玩家 / 聚焦的徽章）不在画面正中，而在 anchor 处——桌面 (50%, 60%)、手机 (50%, 64%)，玩家站在下三分之一，
+ * 画面上方露出地平线与天空；聚焦卡打开时移到手机 (50%, 36%)、桌面 (50%, 45%)，让徽章不被卡片挡住。
+ * 用 camera.setViewOffset 平移投影实现：拾取、render_game_to_text 的屏幕坐标、拟合计算都经过同一个投影矩阵，自动一致。
+ * 视场：由水平 50° 推导垂直视场，再夹在 42°–68°（上一版固定水平 46°，手机竖屏的垂直视场高达 85°，桌面只有 30°）。
+ *
+ * 总览：缩到最远时焦点平滑移到全部委托的中心、俯仰抬到 70°，保证任何航向下所有委托徽章都在屏幕里——
  * 这是发现委托的入口（简报 3.1-4「最大缩小时要能看见全部委托」）。
  *
  * 手感：飞行用定时缓动（默认 easeInOutCubic；聚焦用临界阻尼响应——点下去立刻动、落地不回弹），
@@ -16,7 +21,7 @@
 import * as THREE from 'three';
 import { FEEL, easeResponse, kick, shakeWave } from './feel';
 
-export const TILT_MIN = 35;
+export const TILT_MIN = 20;
 export const TILT_MAX = 70;
 export const DIST_MIN = 160;
 const DEG = Math.PI / 180;
@@ -74,19 +79,27 @@ interface FovKick {
 export class CameraRig {
   readonly camera: THREE.PerspectiveCamera;
   readonly target = new THREE.Vector3();
-  distance = 1300;
-  tilt = 52;
+  distance = 480;
+  tilt = 24;
   heading = 0;
   maxDistance = 14000;
   readonly overviewCenter = new THREE.Vector3();
   /** 默认视角（重置视角回到这里） */
-  home: CameraPose = { target: new THREE.Vector3(), distance: 1300, tilt: 52, heading: 0 };
+  home: CameraPose = { target: new THREE.Vector3(), distance: 480, tilt: 24, heading: 0 };
+  /** 窄屏（手机竖屏）：默认俯角、视距、构图点都按手机取值 */
+  compact = false;
+  /** 当前构图点的纵向位置（0 = 顶，1 = 底），向 anchorGoal 平滑过渡 */
+  anchorY = 0.6;
+  private anchorGoal = 0.6;
+  private focusAnchor = false;
+  private vw = 1;
+  private vh = 1;
   /** 跟随目标：非空时焦点平滑追随这个点（玩家走动时镜头跟着走） */
   follow: THREE.Vector3 | null = null;
   reducedMotion = false;
 
   readonly effTarget = new THREE.Vector3();
-  effTilt = 52;
+  effTilt = 24;
   private flight: Flight | null = null;
   private trauma = 0;
   /** 延迟生效的 trauma（顿帧结束才开始震） */
@@ -126,16 +139,51 @@ export class CameraRig {
     return this.trauma;
   }
 
-  /** 竖屏手机的垂直视场更宽：保持水平视场不至于窄成一条缝 */
+  /** 由水平 50° 推导垂直视场并夹在 42°–68°；窄屏切到手机的默认俯角与构图点 */
   setViewport(width: number, height: number): void {
     const aspect = width / Math.max(1, height);
-    const hfov = 46 * DEG;
-    const v = 2 * Math.atan(Math.tan(hfov / 2) / aspect) / DEG;
-    this.baseFov = Math.min(66, Math.max(40, v));
+    const hfov = 50 * DEG;
+    const v = (2 * Math.atan(Math.tan(hfov / 2) / aspect)) / DEG;
+    this.baseFov = Math.min(68, Math.max(42, v));
     this.camera.aspect = aspect;
     this.scratch.aspect = aspect;
     this.scratch.fov = this.baseFov;
+    this.vw = Math.max(1, width);
+    this.vh = Math.max(1, height);
+    this.compact = width < 640 || aspect < 0.9;
+    this.updateAnchorGoal(true);
     this.scratch.updateProjectionMatrix();
+  }
+
+  /** 默认俯角：手机 30°、桌面 24°（顶部露出地平线与天空） */
+  get defaultTilt(): number {
+    return this.compact ? 30 : 24;
+  }
+
+  /** 默认视距：手机 420 m、桌面 480 m */
+  get defaultDistance(): number {
+    return this.compact ? 420 : 480;
+  }
+
+  /** 聚焦卡打开 / 关闭：构图点上移，让徽章落在卡片上方 */
+  setFocusAnchor(on: boolean): void {
+    this.focusAnchor = on;
+    this.updateAnchorGoal(false);
+  }
+
+  private updateAnchorGoal(snap: boolean): void {
+    this.anchorGoal = this.focusAnchor ? (this.compact ? 0.36 : 0.45) : this.compact ? 0.64 : 0.6;
+    if (snap || this.reducedMotion) this.anchorY = this.anchorGoal;
+  }
+
+  /** 构图点（0–1，屏幕坐标，左上为原点）：调试读数，QA 用它代替「离视口中心」 */
+  get anchor(): { x: number; y: number } {
+    return { x: 0.5, y: Math.round(this.anchorY * 1000) / 1000 };
+  }
+
+  /** 按构图点平移投影：焦点出现在屏幕 (50%, anchorY) 处 */
+  private applyAnchor(cam: THREE.PerspectiveCamera, anchorY: number): void {
+    cam.setViewOffset(this.vw, this.vh, 0, -(anchorY - 0.5) * this.vh, this.vw, this.vh);
   }
 
   /** 用户按下：停止一切插值，从当前画面接手 */
@@ -238,6 +286,8 @@ export class CameraRig {
   update(dt: number): void {
     this.time += dt;
     this.frameDt = dt;
+    // 构图点平滑过渡（约 0.25 s）；减少动态效果时直接切
+    this.anchorY = this.reducedMotion ? this.anchorGoal : this.anchorY + (this.anchorGoal - this.anchorY) * (1 - Math.exp(-dt / 0.25));
     if (this.reducedMotion) {
       // 中途切到「减少动态效果」：正在进行的震屏与视场冲击立即归零，而不是等它衰减完
       this.trauma = 0;
@@ -306,8 +356,11 @@ export class CameraRig {
         cam.rotateZ(FEEL.shake.maxRoll * s * shakeWave(t, 3));
       }
       cam.fov = this.baseFov + this.fovOffset;
+      this.applyAnchor(cam, this.anchorY);
     } else {
       cam.fov = this.baseFov;
+      // 拟合按「目标构图点」算：飞行落地时构图点也已过渡完
+      this.applyAnchor(cam, this.anchorGoal);
     }
     cam.updateProjectionMatrix();
     cam.updateMatrixWorld();

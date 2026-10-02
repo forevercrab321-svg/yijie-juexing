@@ -8,6 +8,9 @@
  *  - 上下文丢失：先等浏览器恢复，2 s 内没恢复就 onFallback 切 2D。
  *  - 卸载：释放全部几何体、材质、纹理、渲染目标，renderer.dispose + forceContextLoss，移除全部监听。
  *  - 统计口径：renderer.info.autoReset=false，每帧开始手动 reset，阴影 pass 与后处理都算在同一帧里。
+ *
+ * 画面（docs/studio/style-cute.md 第 5 节）：晴天里的纽约玩具地图——明亮的草绿陆地、奶油色道路、圆润的粉彩小楼和棒棒糖树，
+ * Q 版的你站在画面下方，五种形状的委托徽章在街角轻轻浮动；GO 式低视角，地平线上有蓬松的云，远处地图融进天空。
  */
 import * as THREE from 'three';
 import type { Quest, Race } from '../../../types';
@@ -16,7 +19,7 @@ import { project, unproject, isInWorld } from './geo';
 import { LandIndex } from './land';
 import { resolveQuality, type Quality } from './quality';
 import { createUniforms, createMaterials, type MaterialKit, type WorldUniforms } from './materials';
-import { createBillboardAtlas, createRuneAtlas, textureBytes } from './textures';
+import { createIconAtlas, createToonGradient, textureBytes } from './icons';
 import { buildCity, type CityResult } from './city';
 import { buildLandmarks, type LandmarkResult } from './landmarks';
 import { computeDayNight, createDayNight, SkyDome, type DayNight } from './atmosphere';
@@ -24,9 +27,11 @@ import { installGrade, gradeToneMapping } from './grade';
 import { BeaconSystem, type Beacon } from './beacons';
 import { PlayerAvatar, QuestPath } from './player';
 import { VfxSystem } from './vfx';
-import { CameraRig, TILT_MAX, type FitMargins } from './cameraRig';
+import { CloudLayer } from './clouds';
+import { CameraRig, TILT_MAX, TILT_MIN, type FitMargins } from './cameraRig';
 import { InputController } from './input';
 import { FEEL, flashCurve } from './feel';
+import { QUEST_TYPES, QUEST_FALLBACK, UI } from './palette';
 
 export class WorldInitError extends Error {
   constructor(readonly reason: string) {
@@ -47,15 +52,12 @@ export interface WorldEventRecord {
   at: number;
 }
 
-/** 安全框（NDC）：避开顶部档案 HUD、右侧控件与底部卡片 / 按钮 */
-const V1_MARGINS: FitMargins = { x: 0.8, yTop: 0.66, yBottom: 0.74 };
+/** 安全框（NDC）：避开顶部档案 HUD、右下控件与底部徽章按钮 */
+const V1_MARGINS: FitMargins = { x: 0.8, yTop: 0.7, yBottom: 0.74 };
 const OVERVIEW_MARGINS: FitMargins = { x: 0.88, yTop: 0.74, yBottom: 0.74 };
 const ACTIVE_MARGINS: FitMargins = { x: 0.72, yTop: 0.52, yBottom: 0.45 };
-const DEFAULT_TILT = 52;
 const ORIGIN = new THREE.Vector3(0, 0, 0);
-const DEG = Math.PI / 180;
-const BEACON_GOLD = new THREE.Color('#e8cf94');
-const BEACON_EMBER = new THREE.Color('#c87a45');
+const DONE_COLOR = new THREE.Color(UI.done);
 // 每帧都要用的临时向量：渲染循环里不分配对象
 const _up = new THREE.Vector3();
 const _right = new THREE.Vector3();
@@ -63,6 +65,10 @@ const _lup = new THREE.Vector3();
 const _snapped = new THREE.Vector3();
 
 const round = (v: number, k = 100) => Math.round(v * k) / k;
+const smoothstep = (a: number, b: number, x: number) => {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
 
 export class WorldEngine {
   readonly quality: Quality;
@@ -80,19 +86,17 @@ export class WorldEngine {
   private readonly cb: EngineCallbacks;
   private readonly uniforms: WorldUniforms;
   private readonly materials: MaterialKit;
-  private readonly billboardTex: THREE.CanvasTexture;
-  private readonly runeTex: THREE.CanvasTexture;
+  private readonly iconTex: THREE.CanvasTexture;
   private readonly city: CityResult;
   private readonly landmarks: LandmarkResult;
   private readonly sky = new SkyDome();
+  private readonly clouds: CloudLayer;
   private readonly beacons: BeaconSystem;
   private readonly player: PlayerAvatar;
   private readonly path: QuestPath;
   private readonly vfx: VfxSystem;
   private readonly hemi: THREE.HemisphereLight;
   private readonly sun: THREE.DirectionalLight;
-  /** 背光侧的冷色补光：不投影、不占 draw call，只在已有的光照计算里多一盏方向光 */
-  private readonly fill: THREE.DirectionalLight;
   private readonly fog: THREE.Fog;
   private readonly input: InputController;
   private readonly dn: DayNight = createDayNight();
@@ -137,6 +141,7 @@ export class WorldEngine {
   private userLevel: number | undefined;
   private playerPos: THREE.Vector3 | null = null;
   private accuracy = 30;
+  private race: Race | undefined;
   private userInteracted = false;
   private hasHadPlayer = false;
   private readonly frameMid = new THREE.Vector3();
@@ -147,6 +152,7 @@ export class WorldEngine {
     this.container = container;
     this.cb = cb;
     this.quality = resolveQuality();
+    const shadows = this.quality.shadowMapSize > 0;
 
     // ── 渲染器 ───────────────────────────────────────────────────────
     this.canvas = document.createElement('canvas');
@@ -168,12 +174,12 @@ export class WorldEngine {
     const r = this.renderer;
     r.info.autoReset = false;
     r.outputColorSpace = THREE.SRGBColorSpace;
-    // 调色写在色调映射里（grade.ts）：Neutral 打底保留 token 色，再加冷影暖光与亮度 S 曲线。
+    // 色调映射是「近似直通 + 柔和高光肩」（grade.ts）：色板颜色进去什么、受光面出来什么。
     // 必须在任何材质编译之前装好——着色器块是在程序编译时才拼进去的
     installGrade();
     r.toneMapping = gradeToneMapping();
-    r.shadowMap.enabled = this.quality.shadowMapSize > 0;
-    r.shadowMap.type = this.quality.tier === 'high' ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+    r.shadowMap.enabled = shadows;
+    r.shadowMap.type = THREE.PCFSoftShadowMap;
     // 城市是静态的：阴影贴图只在视角、太阳或玩家变化时重画，镜头静止时省掉整个阴影 pass（省电）
     r.shadowMap.autoUpdate = false;
     r.shadowMap.needsUpdate = true;
@@ -183,35 +189,38 @@ export class WorldEngine {
 
     // ── 场景 ─────────────────────────────────────────────────────────
     this.uniforms = createUniforms();
-    this.materials = createMaterials(this.uniforms);
-    this.billboardTex = createBillboardAtlas(this.quality.textureSize);
-    this.runeTex = createRuneAtlas(this.quality.textureSize);
+    this.materials = createMaterials(this.uniforms, createToonGradient());
+    this.iconTex = createIconAtlas();
 
     const t0 = performance.now();
     this.land = new LandIndex();
-    this.landmarks = buildLandmarks(this.land, this.materials, this.billboardTex);
+    this.landmarks = buildLandmarks(this.land, this.materials);
     this.city = buildCity({ land: this.land, quality: this.quality, materials: this.materials, extraBuildings: this.landmarks.buildings });
     this.buildMs = performance.now() - t0;
 
-    this.fog = new THREE.Fog(0xd6d6cd, 1500, 9000);
+    this.fog = new THREE.Fog(0xeaf7ff, 800, 2000);
     this.scene.fog = this.fog;
-    this.hemi = new THREE.HemisphereLight(0xa6bcd8, 0x937a5b, 1.0);
-    this.sun = new THREE.DirectionalLight(0xffe2b6, 2.6);
-    if (this.quality.shadowMapSize > 0) {
+    this.hemi = new THREE.HemisphereLight(0xddf1ff, 0xc4e8a6, 1.4);
+    this.sun = new THREE.DirectionalLight(0xfff6e2, 2.6);
+    if (shadows) {
       this.sun.castShadow = true;
       this.sun.shadow.mapSize.set(this.quality.shadowMapSize, this.quality.shadowMapSize);
       this.sun.shadow.bias = -0.0004;
       this.sun.shadow.normalBias = 0.6;
+      // 影子只压掉 45% 的直射光：暗部 ≥ 65% 亮度、偏天光的蓝（指南 5.3），是浅蓝灰的影子而不是黑块
+      this.sun.shadow.intensity = 0.45;
     }
-    // 补光的 target 留在原点：方向 = position − 原点，updateDayNight 每次把 position 设成补光方向
-    this.fill = new THREE.DirectionalLight(0xa3b8d6, 0.6);
-    this.scene.add(this.hemi, this.sun, this.sun.target, this.fill);
+    this.scene.add(this.hemi, this.sun, this.sun.target);
 
-    this.beacons = new BeaconSystem(this.land, this.runeTex, this.uniforms.uTime);
-    this.player = new PlayerAvatar(this.uniforms.uTime, this.uniforms.uNight);
-    this.path = new QuestPath(this.uniforms.uTime);
-    this.vfx = new VfxSystem(this.uniforms.uTime, this.uniforms.uNight, this.uniforms.uCamDist, this.runeTex);
-    this.scene.add(this.sky.mesh, this.city.group, this.landmarks.group, this.beacons.group, this.player.group, this.path.group, this.vfx.group);
+    this.clouds = new CloudLayer(this.materials.cloud, this.quality.clouds);
+    this.beacons = new BeaconSystem(this.land, this.iconTex, this.uniforms);
+    this.player = new PlayerAvatar(this.uniforms, this.materials.gradient, shadows);
+    this.path = new QuestPath(this.uniforms);
+    this.vfx = new VfxSystem(this.uniforms.uTime, this.uniforms.uNight, this.quality.motes);
+    this.player.onSpawn = (at, h) => {
+      if (!this.rig.reducedMotion) this.vfx.spawnPuff(at, h);
+    };
+    this.scene.add(this.sky.mesh, this.clouds.mesh, this.city.group, this.landmarks.group, this.beacons.group, this.player.group, this.path.group, this.vfx.group);
 
     // ── 交互 ─────────────────────────────────────────────────────────
     this.input = new InputController(container, {
@@ -287,9 +296,11 @@ export class WorldEngine {
     this.syncSim();
     this.focusedId = id;
     this.beacons.setState(this.focusedId, this.activeId, this.completedIds, this.userLevel);
+    // 聚焦卡打开时构图点上移（手机 36%、桌面 45%），徽章落在卡片上方
+    this.rig.setFocusAnchor(!!id);
     if (!this.started) return;
     if (id) {
-      // 小档反馈：被点中的光柱闪一下（放大的「弹」由聚焦弹簧负责），镜头推近
+      // 小档反馈：被点中的徽章闪一下（放大的「弹」由聚焦弹簧负责），镜头推近
       this.beacons.tap(id);
       this.flyToQuest(id);
     } else if (this.activeId) this.frameActive();
@@ -307,7 +318,7 @@ export class WorldEngine {
 
   setProgress(completedIds: string[] | undefined, userLevel: number | undefined): void {
     const next = completedIds ?? [];
-    // 运行中新增的已完成委托 = 刚刚结算的那一个：光柱收回地面，遮住「状态瞬间切成已完成」的跳变。
+    // 运行中新增的已完成委托 = 刚刚结算的那一个：徽章缩没再以「已完成」的样子长回来，遮住状态瞬间切换的跳变。
     // 挂载时带进来的老记录不演（started 之前不会进这里）
     if (this.started) {
       this.syncSim();
@@ -320,10 +331,11 @@ export class WorldEngine {
 
   private sealQuest(id: string): void {
     const b = this.beacons.seal(id);
-    if (b && !this.rig.reducedMotion) this.vfx.seal(b.pos, b.urgent ? BEACON_EMBER : BEACON_GOLD, this.rig.distance);
+    if (b && !this.rig.reducedMotion) this.vfx.seal(b.pos, DONE_COLOR, this.rig.distance);
   }
 
   setRace(race: Race | undefined): void {
+    this.race = race;
     this.player.setRace(race);
   }
 
@@ -339,7 +351,8 @@ export class WorldEngine {
       const xz = project(loc[0], loc[1]);
       const surf = this.land.surfaceAt(xz);
       if (!this.playerPos) this.playerPos = new THREE.Vector3();
-      this.playerPos.set(surf.x, Math.max(surf.y, -2.5) + 0.5, surf.z);
+      // 地面最上层（公园小径）在 1.3 m：脚底放在 1.4 m，不陷进地里
+      this.playerPos.set(surf.x, Math.max(surf.y, -2.5) + 1.4, surf.z);
       this.player.setPosition(this.playerPos, this.accuracy);
     } else {
       this.playerPos = null;
@@ -379,9 +392,8 @@ export class WorldEngine {
   }
 
   /**
-   * 聚焦：推近到当前距离的 0.72 倍（夹在 420–900 m；本来就更近时不往回拉），
-   * 起步就有速度的临界阻尼缓动（点下去立刻动、落地不回弹），
-   * 光柱底座落在画面中心偏上——底部要放聚焦卡片，手机上卡片顶边恰好在中线附近。
+   * 聚焦：推近到当前距离的 0.72 倍（夹在 420–900 m；本来就更近时不往回拉），起步就有速度的临界阻尼缓动。
+   * 不再手算「把光柱挪到画面偏上」：聚焦时构图点本身就移到了卡片上方（cameraRig.setFocusAnchor），焦点直接对准徽章底座。
    */
   private flyToQuest(id: string, snap = false): void {
     const b = this.beacons.get(id);
@@ -390,23 +402,10 @@ export class WorldEngine {
     const f = FEEL.focus;
     const cur = this.rig.distance;
     const dist = cur < f.minDist ? cur : Math.min(f.maxDist, Math.max(f.minDist, cur * f.push));
-    const target = this.liftedTarget(b.pos, dist);
+    const target = new THREE.Vector3(b.pos.x, Math.max(0, b.pos.y - 0.6), b.pos.z);
     const travel = Math.hypot(target.x - this.rig.target.x, target.z - this.rig.target.z);
     if (snap) this.rig.snapTo({ target, distance: dist });
     else this.rig.flyTo({ target, distance: dist }, Math.min(1.3, Math.max(0.8, 0.75 + travel / 9000)), false, { ease: 'response' });
-  }
-
-  /**
-   * 让地面点 p 落在画面中心偏上 FEEL.focus.lift（NDC）的相机焦点：焦点沿视线的地面投影往相机方向挪 Δ。
-   * Δ 由透视关系精确解出：Δ·sin(e) / (d + Δ·cos(e)) = lift·tan(fov/2)。
-   */
-  private liftedTarget(p: THREE.Vector3, dist: number): THREE.Vector3 {
-    const e = this.rig.tilt * DEG;
-    const h = this.rig.heading * DEG;
-    const l = FEEL.focus.lift * Math.tan((this.rig.fov * DEG) / 2);
-    const delta = Math.max(0, (l * dist) / Math.max(0.2, Math.sin(e) - l * Math.cos(e)));
-    // 视线在地面上的前进方向 = (sin h, 0, −cos h)（与 cameraRig 的相机摆位一致），焦点往反方向挪
-    return new THREE.Vector3(p.x - Math.sin(h) * delta, Math.max(0, p.y - 0.6), p.z + Math.cos(h) * delta);
   }
 
   /** 进行中的委托：同时框住玩家与目标 */
@@ -422,7 +421,7 @@ export class WorldEngine {
     const d = this.rig.fitDistance(mid, [this.playerPos, b.pos], this.rig.tilt, [this.rig.heading], ACTIVE_MARGINS);
     const dist = Math.min(this.rig.maxDistance * 0.7, Math.max(450, d));
     this.frameMid.copy(mid);
-    // 刚接取：先让玩家在原地看清光柱上的冲击（顿帧 + 冲击波起势），再拉远去交代路径
+    // 刚接取：先让玩家在原地看清徽章上的冲击（顿帧 + 冲击环起势），再拉远去交代路径
     const sinceImpact = this.impactAt < 0 ? Infinity : this.realT - this.impactAt;
     const hold = sinceImpact < 0.4 ? Math.max(0, FEEL.pulse.hitStop + FEEL.pulse.cameraHold - sinceImpact) : 0;
     if (snap) this.rig.snapTo({ target: mid, distance: dist });
@@ -436,6 +435,7 @@ export class WorldEngine {
     if (this.playerPos) {
       this.rig.flyTo({ target: this.rig.home.target, distance: this.rig.home.distance }, 0.9);
       this.rig.follow = this.playerPos;
+      this.player.pop();
     } else {
       this.rig.flyTo({ target: ORIGIN, distance: this.rig.home.distance }, 0.9);
     }
@@ -462,24 +462,31 @@ export class WorldEngine {
     this.computeHome();
   }
 
+  /**
+   * 默认视角（指南 5.8）：俯角手机 30° / 桌面 24°，视距手机 420 / 桌面 480 m；
+   * 若最近 3 个委托进不了构图安全区就自动拉远，夹在 380–1400 m。
+   * 有定位：以玩家为中心；没有可用定位（未授权、没信号、不在纽约）：以时代广场为中心（QA-R1-02：大多数测试者不在纽约）。
+   *
+   * 「最近 3 个」优先从镜头前方（默认朝北，即玩家以北）挑：低俯角下，玩家身后与身侧近处的点要拉到几公里外才进得了画面
+   * （时代广场出发时，南侧的图书馆、中央车站在 1400 m 内怎么拉都进不来）。前方不足 3 个才用全部委托补齐；
+   * 拉到 1400 m 仍框不住时，从最远的那个开始去掉——宁可少框一个，也不把镜头扯到上空、让主角缩成一个点。
+   */
   private computeHome(): void {
     const home = this.rig.home;
-    home.tilt = DEFAULT_TILT;
+    home.tilt = this.rig.defaultTilt;
     home.heading = 0;
-    /*
-     * 有定位：以玩家为中心；没有可用定位（未授权、没信号、不在纽约）：以时代广场为中心。
-     * 两种情况都拟合「中心 + 最近的 3 个委托」。原先无定位分支写死 1300 m，只框得住 1 根光柱，
-     * 而大多数测试者不在纽约、看到的恰恰是这一档——「光柱在城市各处升起」对他们不成立（QA-R1-02）。
-     * 没有委托可框时保留原来的默认距离：有定位 650 m 起，无定位 1300 m。
-     */
     const c = this.playerPos ?? ORIGIN;
     home.target.set(c.x, 0, c.z);
-    const nearest = [...this.beacons.beacons]
-      .sort((a, b) => Math.hypot(a.pos.x - c.x, a.pos.z - c.z) - Math.hypot(b.pos.x - c.x, b.pos.z - c.z))
-      .slice(0, 3)
-      .map((b) => b.pos);
-    const fit = nearest.length ? this.rig.fitDistance(home.target, [c, ...nearest], DEFAULT_TILT, [0], V1_MARGINS) : 0;
-    home.distance = Math.min(this.rig.maxDistance * 0.6, Math.max(this.playerPos ? 650 : 1300, fit));
+    const byDist = [...this.beacons.beacons].sort((a, b) => Math.hypot(a.pos.x - c.x, a.pos.z - c.z) - Math.hypot(b.pos.x - c.x, b.pos.z - c.z));
+    const ahead = byDist.filter((b) => b.pos.z - c.z <= 60);
+    const pick = (ahead.length >= 3 ? ahead : byDist).slice(0, 3).map((b) => b.pos);
+    let fit = 0;
+    while (pick.length) {
+      fit = this.rig.fitDistance(home.target, [c, ...pick], home.tilt, [0], V1_MARGINS);
+      if (fit <= 1400 || pick.length === 1) break;
+      pick.pop();
+    }
+    home.distance = Math.min(1400, Math.min(this.rig.maxDistance * 0.6, Math.max(this.rig.defaultDistance, Math.max(380, fit))));
   }
 
   // ── 世界事件 ───────────────────────────────────────────────────────
@@ -497,14 +504,15 @@ export class WorldEngine {
         this.resetView();
         break;
       case 'pulse': {
-        // 中档：顿帧（光柱压扁、底座一团闪光）→ 松开（光柱拉长、冲击波、轻震、视场外踢）→ 停一拍后拉远、路径生长
+        // 中档：顿帧（徽章压扁、底座一团白光）→ 松开（徽章弹起、类型色冲击环 + 纸屑、轻震、视场外踢）→ 停一拍后拉远、路径生长
         const b = this.beacons.impact(e.questId);
         if (b) {
           const f = FEEL.pulse;
           const reduced = this.rig.reducedMotion;
-          // 减少动态效果：冲击波本身就是「冲击」，整屏扩散的环不播；光柱的亮度闪光（beacons.impact）照样说明「接的是这一根」
+          // 减少动态效果：冲击环与纸屑不播；徽章的亮度闪光（beacons.impact）照样说明「接的是这一枚」
           if (!reduced) {
-            this.vfx.pulse(b.pos, b.urgent ? BEACON_EMBER : BEACON_GOLD, this.rig.distance, f.hitStop);
+            const type = QUEST_TYPES[b.quest.type] ?? QUEST_FALLBACK;
+            this.vfx.pulse(b.pos, new THREE.Color(b.urgent ? UI.coral400 : type.c400), this.rig.distance, f.hitStop);
             this.hitStop(f.hitStop);
             this.rig.addTrauma(f.trauma, f.hitStop);
             this.rig.kickFov(f.fovKick, f.hitStop);
@@ -516,7 +524,7 @@ export class WorldEngine {
       }
       case 'celebrate': {
         // 大档：蓄力与结算卡记账同步，在 SETTLE_BEATS.levelUp 那一拍爆发（与卡片「等级提升」、顶栏等级跳动同拍）
-        const at = this.playerPos ?? this.rig.effTarget;
+        const at = this.player.visible ? this.player.shown : this.rig.effTarget;
         const c = FEEL.celebrate;
         const reduced = this.rig.reducedMotion;
         this.vfx.celebrate(at, this.rig.distance, c.lead, reduced);
@@ -532,7 +540,7 @@ export class WorldEngine {
     }
   };
 
-  /** 顿帧：delay 秒后，环境动画（水面、光柱流动、灯笼、浮光）停 dur 秒。镜头与输入不受影响 */
+  /** 顿帧：delay 秒后，环境动画（水面、徽章浮动、光点）停 dur 秒。镜头与输入不受影响 */
   private hitStop(dur: number, delay = 0): void {
     this.hitStops.push({ at: this.realT + delay, dur });
   }
@@ -547,6 +555,7 @@ export class WorldEngine {
 
   private pickAt(clientX: number, clientY: number, radius: number): Beacon | null {
     const rect = this.canvas.getBoundingClientRect();
+    this.syncPx();
     return this.beacons.pick(clientX, clientY, this.rig.camera, rect, radius);
   }
 
@@ -590,21 +599,25 @@ export class WorldEngine {
     this.frame();
   };
 
-  /**
-   * 推进模拟到 now（墙钟时间）。模拟与渲染解耦：镜头飞行、冲击波、聚焦缓动都按真实时间走，
-   * 读调试状态时也会先推进到当前时刻——即使慢设备一秒只画一帧，读到的镜头与特效状态也是「此刻」的。
-   */
   /** 外部输入（事件、props、手势）改变状态之前，先把模拟推进到此刻，新动画从「现在」开始计时 */
   private syncSim(): void {
     if (this.started && !this.disposed) this.advance(performance.now());
   }
 
+  /** 一个 CSS 像素在距相机 1 米处对应的世界长度：徽章、路径、精度圈白边都按它换算像素尺寸 */
+  private syncPx(): void {
+    this.uniforms.uPx.value = (2 * Math.tan((this.rig.camera.fov * Math.PI) / 360)) / Math.max(1, this.height);
+  }
+
+  /**
+   * 推进模拟到 now（墙钟时间）。模拟与渲染解耦：镜头飞行、冲击环、聚焦缓动都按真实时间走，
+   * 读调试状态时也会先推进到当前时刻——即使慢设备一秒只画一帧，读到的镜头与特效状态也是「此刻」的。
+   */
   private advance(now: number): void {
     if (!this.simT) this.simT = now;
     const dt = Math.min(1, Math.max(0, (now - this.simT) / 1000));
     this.simT = now;
-    // 顿帧：与顿帧窗口重叠的那部分时间，环境时钟只走 5%。按区间求重叠而不是看「此刻在不在窗口里」——
-    // 慢设备一帧可能跨过整个 60 ms 的窗口，那样顿帧会被整个跳过或整帧冻住
+    // 顿帧：与顿帧窗口重叠的那部分时间，环境时钟只走 5%。按区间求重叠而不是看「此刻在不在窗口里」
     const t1 = this.realT;
     const t2 = t1 + dt;
     let frozen = 0;
@@ -620,28 +633,33 @@ export class WorldEngine {
     const cam = this.rig.camera;
     const dist = this.rig.distance;
     this.uniforms.uCamDist.value = dist;
+    this.syncPx();
 
-    // 雾随距离：默认视角里画面下半部清楚、上缘（约 3 km 外）退进浅色的空气里，低俯角时远景层层变浅——
-    // 空气透视给出近 / 中 / 远三层。原先起雾点在焦点距离的 1.1 倍之外，默认视角整屏都在起雾点以内，画面没有纵深。
-    // 拉远进入总览时退回原来的稀薄雾（按总览混合系数插值），岛形与河道仍然清清楚楚（M3-13）
-    const ob = this.rig.overviewBlend();
-    this.fog.near = dist * (0.5 + 0.6 * ob) + 100;
-    this.fog.far = Math.min(cam.far * 0.95, dist * (2.5 + 1.7 * ob) + 1200 + 3300 * ob);
+    // 远景渐隐（指南 5.8）：线性雾 near = 1.6 × 视距、far = 4.2 × 视距（near ≥ 600 m、far ≤ 9000 m）——
+    // 地平线一带退进浅天色，地图「融进天空」。视距 > 2600 m（总览）时雾放开，整个曼哈顿清清楚楚
+    const near = Math.max(600, dist * 1.6);
+    const far = Math.min(9000, Math.max(near + 400, dist * 4.2));
+    // 放开到「整座岛清清楚楚、地图边缘仍退进雾里」为止：完全放开的话，海岸线数据的矩形边界会在地平线上露出一条直线
+    const open = smoothstep(3200, 7000, dist);
+    this.fog.near = near + (dist * 1.05 - near) * open;
+    this.fog.far = far + (dist * 2.2 + 4000 - far) * open;
 
     this.updateShadowCamera();
     this.sky.update(this.dn, cam.position, cam.far * 0.85);
+    this.clouds.update(this.rig.effTarget, dist, cam.position.y - this.rig.effTarget.y, 1 - smoothstep(2200, 4200, dist), this.time);
 
+    this.beacons.setOverview(this.rig.overviewBlend());
     this.beacons.update(dt);
     const active = this.beacons.get(this.activeId);
-    const motion = this.rig.reducedMotion ? 0.3 : 1;
-    this.player.update(dt, this.time, dist, active ? active.pos : cam.position, motion);
+    const motion = this.rig.reducedMotion ? 0 : 1;
+    this.player.update(dt, dist, cam.position, active ? active.pos : null, motion, this.rig.compact ? 72 : 64);
     this.path.update(dt);
-    this.path.set(this.playerPos, active ? active.pos : null, dist);
+    this.path.set(this.player.visible ? this.player.shown : null, active ? active.pos : null, dist * (this.uniforms.uPx.value as number));
     if (active && this.playerPos) {
       this.frameMid.addVectors(this.playerPos, active.pos).multiplyScalar(0.5);
       this.frameMid.y = 0;
     }
-    this.vfx.update(dt, this.rig.effTarget);
+    this.vfx.update(dt, this.player.visible ? this.player.shown : this.rig.effTarget, dist);
     this.player.setGlow(this.vfx.glow);
   }
 
@@ -701,8 +719,8 @@ export class WorldEngine {
     const k = this.shadowKey;
     const c = this.sun.shadow.camera;
     const d = this.dn.lightDir;
-    const pp = this.playerPos;
-    const next = [this.sun.target.position.x, this.sun.target.position.z, c.right, d.x * 1000, d.y * 1000, d.z * 1000, pp ? pp.x : 0, pp ? pp.z + this.rig.distance * 1e-3 : 0];
+    const pp = this.player.visible ? this.player.shown : null;
+    const next = [this.sun.target.position.x, this.sun.target.position.z, c.right, d.x * 1000, d.y * 1000, d.z * 1000, pp ? pp.x : 0, pp ? pp.z + this.player.height * 0.1 : 0];
     const texel = (2 * c.right) / (this.quality.shadowMapSize || 1024);
     let dirty = Number.isNaN(k[0]);
     if (!dirty) {
@@ -733,25 +751,24 @@ export class WorldEngine {
     this.hemi.intensity = dn.hemiIntensity;
     this.sun.color.copy(dn.lightColor);
     this.sun.intensity = dn.lightIntensity;
-    this.fill.color.copy(dn.fillColor);
-    this.fill.intensity = dn.fillIntensity;
-    this.fill.position.copy(dn.fillDir).multiplyScalar(1000);
     this.fog.color.copy(dn.fog);
     this.renderer.setClearColor(dn.fog);
-    // 升级高潮的曝光闪叠在昼夜曝光上（只闪一次、0.35 s 缓出；减少动态效果时不排程）
+    // 升级高潮的曝光闪叠在曝光上（只闪一次、0.35 s 缓出；减少动态效果时不排程）
     this.renderer.toneMappingExposure = dn.exposure * (1 + this.flashGain());
     this.uniforms.uNight.value = dn.night;
     this.uniforms.uSkyTop.value.copy(dn.skyTop);
     this.uniforms.uSkyHorizon.value.copy(dn.skyHorizon);
+    this.uniforms.uSunDir.value.copy(dn.lightDir);
     this.materials.update(dn.night);
   }
 
   /** 太阳阴影相机跟随焦点，覆盖范围随缩放变化；按纹素对齐，镜头移动时阴影边缘不闪 */
   private updateShadowCamera(): void {
+    if (this.quality.shadowMapSize <= 0) return;
     const center = this.rig.effTarget;
     const S = Math.min(9000, Math.max(380, this.rig.distance * 1.25));
     const sc = this.sun.shadow.camera;
-    const size = this.quality.shadowMapSize || 1024;
+    const size = this.quality.shadowMapSize;
     const texel = (2 * S) / size;
     const dir = this.dn.lightDir;
     // 在光源空间里对齐纹素：把中心投到垂直于光方向的平面上再取整
@@ -788,8 +805,10 @@ export class WorldEngine {
     this.renderer.setPixelRatio(dpr);
     this.renderer.setSize(w, h, false);
     this.vfx.setPixelRatio(dpr);
+    this.beacons.setViewport(w);
     this.rig.setViewport(w, h);
     this.rig.camera.updateProjectionMatrix();
+    this.syncPx();
     if (this.beacons.beacons.length) this.updateLimits();
     // 尺寸变化后立刻补画一帧，避免拉伸的旧画面停留到下一次 rAF
     if (this.started && !this.hidden && !this.contextLost) this.frame();
@@ -825,12 +844,13 @@ export class WorldEngine {
     const reduced = this.reducedMotionProp ?? !!this.motionQuery?.matches;
     this.rig.reducedMotion = reduced;
     this.beacons.setReducedMotion(reduced);
+    this.vfx.setMotesEnabled(!reduced);
   };
 
   // ── 调试钩子用的读数与操作 ───────────────────────────────────────────
 
   private textureMB(): number {
-    let bytes = textureBytes(this.billboardTex) + textureBytes(this.runeTex);
+    let bytes = textureBytes(this.iconTex) + textureBytes(this.materials.gradient);
     if (this.quality.shadowMapSize > 0) bytes += this.quality.shadowMapSize ** 2 * (4 + 4);
     return bytes / (1024 * 1024);
   }
@@ -848,7 +868,7 @@ export class WorldEngine {
       fps: round(this.fps, 10),
       tier: this.quality.tier,
       dpr: this.dpr,
-      // 不开后处理：bloom 在本作里收益很小（光柱与灯笼本身就是叠加发光），见交接文档的取舍说明
+      // 不开后处理：徽章光晕与夜间灯光都是材质自己画的柔光（指南 5.2：手机 0 pass）
       postPasses: 0,
       shadowMapSize: this.quality.shadowMapSize,
       textureMB: round(this.textureMB(), 10),
@@ -868,14 +888,28 @@ export class WorldEngine {
     const s = { x: 0, y: 0, front: false };
     const onScreen = (p: { x: number; y: number; front: boolean }) =>
       p.front && p.x >= rect.left && p.x <= rect.right && p.y >= rect.top && p.y <= rect.bottom;
+    const head = new THREE.Vector3();
     const beacons = this.beacons.beacons.map((b) => {
       this.beacons.toScreen(b.pos, cam, rect, s);
-      return { id: b.id, screen: { x: round(s.x, 10), y: round(s.y, 10) }, onScreen: onScreen(s), onLand: b.onLand, urgent: b.urgent };
+      const base = { id: b.id, screen: { x: round(s.x, 10), y: round(s.y, 10) }, onScreen: onScreen(s), onLand: b.onLand, urgent: b.urgent };
+      this.beacons.badgeCenter(b, cam, head);
+      this.beacons.toScreen(head, cam, rect, s);
+      // 新增：徽章中心的屏幕坐标与外形（0 扇贝 · 1 盾 · 2 六边形 · 3 对话气泡 · 4 十字），QA 校验「五种外形」用
+      return { ...base, badge: { x: round(s.x, 10), y: round(s.y, 10) }, shape: b.shape, type: b.quest.type };
     });
-    let player: { screen: { x: number; y: number }; onScreen: boolean } | null = null;
+    let player: { screen: { x: number; y: number }; onScreen: boolean; heightPx?: number; race?: string | null; walking?: boolean } | null = null;
     if (this.playerPos) {
-      this.beacons.toScreen(this.playerPos, cam, rect, s);
+      // 读「画面上的角色」而不是定位点：定位一变角色要走过去，途中两者不在一处，
+      // 自动化按这个坐标裁图、点击，读定位点会裁到空草地（定位点本身由 camera.target / recenter 体现）
+      const at = this.player.shown;
+      this.beacons.toScreen(at, cam, rect, s);
+      const foot = { x: s.x, y: s.y };
       player = { screen: { x: round(s.x, 10), y: round(s.y, 10) }, onScreen: onScreen(s) };
+      head.copy(at).setY(at.y + this.player.height);
+      this.beacons.toScreen(head, cam, rect, s);
+      player.heightPx = round(Math.hypot(s.x - foot.x, s.y - foot.y), 10);
+      player.race = this.race ?? null;
+      player.walking = this.player.shown.distanceTo(this.playerPos) > 0.3;
     }
     const tgt = unproject(snap.target.x, snap.target.z);
     return {
@@ -886,6 +920,10 @@ export class WorldEngine {
         tilt: round(snap.tilt),
         heading: round(snap.heading),
         zoom: round(snap.zoom),
+        // 新增：构图点（0–1，左上为原点）——焦点 / 玩家在屏幕上的目标位置。QA 的「离视口中心」类断言改为「离构图点」
+        anchor: this.rig.anchor,
+        fov: round(this.rig.fov),
+        tiltRange: [TILT_MIN, TILT_MAX],
       },
       focusedQuestId: this.focusedId,
       activeQuestId: this.activeId,
@@ -900,7 +938,7 @@ export class WorldEngine {
       reducedMotion: this.rig.reducedMotion,
       vfx: { shockwave: this.vfx.shockwaveActive, celebrate: this.vfx.celebrateActive, seal: this.vfx.sealActive },
       // 手感读数（feel.ts）：震屏 trauma、视场冲击（度）、是否在顿帧、曝光闪增益、升级演出段落、路径生长进度、
-      // 聚焦 / 进行中那根光柱的弹簧值与挤压量。自动化验证时序用，不靠截图猜
+      // 聚焦 / 进行中那枚徽章的弹簧值与挤压量。自动化验证时序用，不靠截图猜
       feel: {
         trauma: round(this.rig.shakeTrauma, 1000),
         fov: round(this.rig.fovOffset, 1000),
@@ -913,6 +951,9 @@ export class WorldEngine {
       },
       maxZoom: round(this.rig.maxDistance),
       homeZoom: round(this.rig.home.distance),
+      // 新增：昼夜读数（night 0–1、太阳仰角）
+      night: round(this.dn.night, 1000),
+      sunElevation: this.dn.sunElevation,
     };
   }
 
@@ -935,7 +976,7 @@ export class WorldEngine {
   /** 调试：直接设定镜头（QA 复现视角用）。target 可给世界坐标 {x,z} 或经纬度 {lat,lon} */
   setView(v: { tilt?: number; heading?: number; zoom?: number; target?: { x?: number; z?: number; lat?: number; lon?: number } }): void {
     const pose: { tilt?: number; heading?: number; distance?: number; target?: THREE.Vector3 } = {};
-    if (typeof v.tilt === 'number') pose.tilt = Math.min(TILT_MAX, Math.max(35, v.tilt));
+    if (typeof v.tilt === 'number') pose.tilt = Math.min(TILT_MAX, Math.max(TILT_MIN, v.tilt));
     if (typeof v.heading === 'number') pose.heading = v.heading;
     if (typeof v.zoom === 'number') pose.distance = Math.min(this.rig.maxDistance, Math.max(160, v.zoom));
     if (v.target) {
@@ -955,6 +996,20 @@ export class WorldEngine {
 
   recenterNow(): void {
     this.recenter();
+  }
+
+  /** 逐网格的三角形读数（按「一次绘制提交的三角形 × 实例数」估算，与 renderer.info 同口径） */
+  breakdown(): { name: string; triangles: number; instances: number; castShadow: boolean; visible: boolean }[] {
+    const out: { name: string; triangles: number; instances: number; castShadow: boolean; visible: boolean }[] = [];
+    this.scene.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.geometry || !(m as unknown as { isMesh?: boolean; isPoints?: boolean; isLine?: boolean }).isMesh) return;
+      const g = m.geometry;
+      const n = g.index ? g.index.count : g.getAttribute('position')?.count ?? 0;
+      const inst = (m as THREE.InstancedMesh).isInstancedMesh ? (m as THREE.InstancedMesh).count : 1;
+      out.push({ name: m.name || m.type, triangles: Math.round((n / 3) * inst), instances: inst, castShadow: m.castShadow, visible: m.visible });
+    });
+    return out.sort((a, b) => b.triangles - a.triangles);
   }
 
   statsWithBuild() {
@@ -985,13 +1040,12 @@ export class WorldEngine {
     this.player.dispose();
     this.path.dispose();
     this.vfx.dispose();
+    this.clouds.dispose();
     this.sky.dispose();
     this.materials.dispose();
-    this.billboardTex.dispose();
-    this.runeTex.dispose();
+    this.iconTex.dispose();
     this.sun.shadow.map?.dispose();
     this.sun.dispose();
-    this.fill.dispose();
     this.hemi.dispose();
     this.scene.clear();
     this.renderer.renderLists.dispose();

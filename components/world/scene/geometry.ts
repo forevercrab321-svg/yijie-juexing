@@ -1,6 +1,6 @@
 /**
- * 几何小工具。代替 three/examples 的 BufferGeometryUtils：这里只需要「合并非索引几何」与「平滑的团状树冠」，
- * 自己写二十几行，3D 分包少打约 5 KB（分包体积预算 650 KB 卡得很紧）。
+ * 几何小工具。代替 three/examples 的 BufferGeometryUtils：这里只需要「合并非索引几何」与「带洞轮廓拉伸」，
+ * 自己写几十行，3D 分包少打约 5 KB（分包体积预算 720 KB）。
  */
 import * as THREE from 'three';
 
@@ -28,26 +28,6 @@ export function mergeNonIndexed(geos: THREE.BufferGeometry[]): THREE.BufferGeome
     out.setAttribute(name, new THREE.BufferAttribute(arr, itemSize));
   }
   return out;
-}
-
-/**
- * 一团平滑的「球状」几何：二十面体的法线直接取径向（球面上径向就是法线），省掉顶点焊接再算法线的步骤。
- * 非均匀压扁时按逆缩放修正法线，光照仍然柔和。返回非索引几何（无 uv）。
- */
-export function smoothBlob(radius: number, squashY: number, cx: number, cy: number, cz: number): THREE.BufferGeometry {
-  const g = new THREE.IcosahedronGeometry(radius, 0);
-  g.deleteAttribute('uv');
-  const pos = g.getAttribute('position') as THREE.BufferAttribute;
-  const nor = g.getAttribute('normal') as THREE.BufferAttribute;
-  const n = new THREE.Vector3();
-  for (let i = 0; i < pos.count; i++) {
-    n.set(pos.getX(i), pos.getY(i) / squashY, pos.getZ(i)).normalize();
-    nor.setXYZ(i, n.x, n.y, n.z);
-    pos.setXYZ(i, pos.getX(i) + cx, pos.getY(i) * squashY + cy, pos.getZ(i) + cz);
-  }
-  pos.needsUpdate = true;
-  nor.needsUpdate = true;
-  return g;
 }
 
 /**

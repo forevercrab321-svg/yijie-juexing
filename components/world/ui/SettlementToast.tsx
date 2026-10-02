@@ -7,6 +7,8 @@ import './worldUi.css';
 
 /**
  * 提交证明后的结算演出：金币 / 信任 / 经验逐项计数，升级时多一段专门的段落，几秒后自动收起。
+ * 可爱风格：白色大圆角卡，顶上探出公会徽记；三格奖励是各自色调的内凹格 + 32px 等宽数字；升级横幅是暖黄底深棕字。
+ * 手机上贴在顶部按钮列之下（QA-R1-11）：居中会盖住画面中下部的玩家与升级纸屑。
  *
  * 节奏（feelTiming.ts）：卡片弹出 → 停一拍 → 三笔依次计数，每笔落账时数字「盖章」般一顿、格子闪一下
  * → 贡献浮现 → 停半拍 → 「等级提升」砸下来，卡片被震得一沉。最后这一拍与 3D 世界的 celebrate 爆发、
@@ -46,11 +48,32 @@ const BEAT_VARS = {
 
 const easeOutCubic = (x: number) => 1 - Math.pow(1 - Math.min(1, Math.max(0, x)), 3);
 
+/** 三格的色调与 TopHud、聚焦卡片的奖励标签一致：金币暖黄、信任成功绿、经验天蓝 */
 const CELLS = [
-  ['gold', Coins, 'text-amber-400'],
-  ['trust', ShieldCheck, 'text-emerald-400'],
-  ['xp', Sparkles, 'text-amber-200'],
+  ['gold', Coins, 'cute-tone-sun'],
+  ['trust', ShieldCheck, 'cute-tone-success'],
+  ['xp', Sparkles, 'cute-tone-sky'],
 ] as const;
+
+/** 升级纸屑：每颗的颜色、飞出方向与大小（品牌青 / 莓粉 / 天蓝三色，与 3D 世界的 celebrate 纸屑同一组） */
+const CONFETTI = ([
+  ['--cute-teal-400', -150, -30, 12],
+  ['--quest-envoy-400', -96, -46, 9],
+  ['--cute-sky-400', -40, -52, 12],
+  ['--cute-teal-400', 44, -50, 9],
+  ['--quest-envoy-400', 100, -42, 12],
+  ['--cute-sky-400', 150, -24, 10],
+] as const).map(([c, x, y, size]) => ({ '--c': `var(${c})`, '--x': `${x}px`, '--y': `${y}px`, width: size, height: size } as React.CSSProperties));
+
+/** 顶上探出的公会徽记：与底部公会徽章按钮同一套白盾 + 暖黄四角星（风格指南附录 B），「这一单是公会认可的」 */
+const SEAL = (
+  <span className="wui-seal absolute grid place-items-center w-14 h-14 border-4 rounded-full">
+    <svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true">
+      <path d="M16 3.5c3.6 2.2 7.3 3.2 11 3.3v8.3c0 6.4-4.3 11.2-11 13.6C9.3 26.3 5 21.5 5 15.1V6.8c3.7-.1 7.4-1.1 11-3.3z" fill="#fff" />
+      <path d="M16 9.2l1.9 4.7 4.7 1.9-4.7 1.9L16 22.4l-1.9-4.7-4.7-1.9 4.7-1.9z" fill="var(--cute-sun-400)" stroke="var(--cute-sun-lip)" strokeWidth="0.8" strokeLinejoin="round" />
+    </svg>
+  </span>
+);
 
 const SettlementToast: React.FC<SettlementToastProps> = ({
   settlement, questTitle, onDone,
@@ -147,19 +170,19 @@ const SettlementToast: React.FC<SettlementToastProps> = ({
           aria-hidden="true"
           onClick={dismiss}
           style={BEAT_VARS}
-          className={`wui-st wui-flat rune-panel parchment-noise cursor-pointer rounded-2xl p-4 text-center text-slate-100${shown.leveledUp ? ' wui-lvl' : ''}${leaving ? ' wui-out' : ''}`}
+          className={`cute-root cute-modal wui-st fixed inset-x-0 mx-auto max-w-[23rem] overflow-visible pt-[34px] px-4 pb-4 text-center cursor-pointer${shown.leveledUp ? ' wui-lvl' : ''}${leaving ? ' wui-out' : ''}`}
         >
-          <div className="wui-crest"><i /></div>
-          <p className="mt-1.5 fantasy-font text-xl font-bold tracking-widest text-amber-200">{repeat ? t.settledRepeat : t.settled}</p>
-          <p className="wui-wrap mt-1 text-sm leading-snug text-slate-300" title={questTitle}>{questTitle}</p>
-          {repeat && <p className="mt-1 text-sm text-slate-300">{t.repeatNote}</p>}
+          {SEAL}
+          <p className="m-0 font-cute-display text-cute-xl">{repeat ? t.settledRepeat : t.settled}</p>
+          <p className="mt-0.5 mb-0 text-cute-sm text-cute-ink-2 wui-wrap" title={questTitle}>{questTitle}</p>
+          {repeat && <p className="mt-0.5 mb-0 text-cute-sm text-cute-ink-2">{t.repeatNote}</p>}
 
-          <div className="mt-3 grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-3 gap-2 mt-3">
             {CELLS.map(([key, Icon, tone], i) => (
-              <div key={key} className={`wui-cell flex flex-col items-center gap-1 rounded-xl bg-black/20 px-1 py-2${landed(i) ? ' wui-land' : ''}`}>
-                <Icon size={18} strokeWidth={2} className={tone} />
-                <span className="wui-amt wui-tnum flex items-baseline fantasy-font text-2xl font-bold leading-tight">
-                  <span className="text-base text-slate-300">+</span>
+              <div key={key} className={`wui-cell wui-tint relative flex flex-col items-center gap-0.5 px-1 pt-2.5 pb-2 rounded-cute-md ${tone}${landed(i) ? ' wui-land' : ''}`}>
+                <Icon size={20} strokeWidth={2.5} />
+                <span className="wui-amt cute-num flex items-baseline text-cute-num">
+                  <i className="not-italic text-cute-lg">+</i>
                   <span className="wui-num">
                     <span data-testid={`settle-${key}`} data-value={finals[i]} className={counting(i) ? 'wui-hide' : undefined}>
                       {finals[i]}
@@ -167,26 +190,26 @@ const SettlementToast: React.FC<SettlementToastProps> = ({
                     {counting(i) && <span>{valueAt(i)}</span>}
                   </span>
                 </span>
-                <span className="text-xs tracking-wider text-slate-500">{labels[i]}</span>
+                <span className="text-cute-cap text-cute-ink-3">{labels[i]}</span>
               </div>
             ))}
           </div>
 
           {contribution > 0 && (
-            <p className="wui-contrib mt-2 text-[13px] text-slate-300" data-testid="settle-contribution">{t.contribution} +{contribution}</p>
+            <p className="wui-contrib mt-2 mb-0 text-cute-sm text-cute-ink-2" data-testid="settle-contribution">{t.contribution} +{contribution}</p>
           )}
 
           {shown.leveledUp && (
             <div
-              className="wui-band mt-3 rounded-xl px-3 py-2.5"
+              className="wui-band relative flex flex-wrap items-baseline justify-center gap-x-2.5 mt-3 mb-1 px-3 pt-1.5 pb-2 rounded-cute-card"
               data-testid="settle-levelup"
               data-from={int(shown.fromLevel)}
               data-to={int(shown.toLevel)}
             >
-              <span className="block text-xs tracking-widest text-amber-400">{t.levelUp}</span>
-              <span className="wui-tnum fantasy-font text-2xl font-bold text-amber-200">
-                Lv{int(shown.fromLevel)} → Lv{int(shown.toLevel)}
-              </span>
+              <b className="text-cute-body font-black">{t.levelUp}</b>
+              <span className="cute-num font-cute-display text-cute-2xl">Lv{int(shown.fromLevel)} → Lv{int(shown.toLevel)}</span>
+              {/* 六颗星星纸屑，在升级拍从横幅中心迸出（纯装饰，减少动态效果时不显示） */}
+              {CONFETTI.map((c, i) => <i key={i} style={c} />)}
             </div>
           )}
         </div>

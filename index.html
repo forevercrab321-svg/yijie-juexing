@@ -21,6 +21,14 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Noto+Serif+SC:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <!--
+      可爱风格（docs/studio/style-cute.md）的字体，迁移期间与上面的旧字体并存，发布阶段再删旧的。
+      Nunito：圆头收笔的西文与数字，粗字重有「软糖」感，且带等宽数字（tnum）。
+      Noto Sans SC：Google Fonts 上没有覆盖简体中文的圆体，用黑体的 700 / 900 粗字重换来同样敦实、亲和的观感。
+      ZCOOL KuaiLe（站酷快乐体）：只给 ≥ 20px 的标题，负责可爱的个性；正文用它会累眼。
+      中文字体由 Google 按 unicode-range 切片，只下载页面上真正出现的字，不会整包拉取。
+    -->
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800;900&family=Noto+Sans+SC:wght@500;700;900&family=ZCOOL+KuaiLe&display=swap" rel="stylesheet">
 
     <style>
       :root {
@@ -54,6 +62,85 @@
         --ease-out-soft:  cubic-bezier(0.16, 1, 0.3, 1);
         --dur-slow:       620ms;
         --dur-base:       380ms;
+
+        /* ══ 可爱风格 token（--cute-*）══════════════════════════════════
+           唯一依据是 docs/studio/style-cute.md，hex 与 tailwind.config.js 的 cute / quest 命名空间一一对应，改一处必须改两处。
+           上面的旧 token 在迁移期间保留（旧组件还靠它们），发布阶段统一清理。
+
+           每个强调色分三档，用法是硬规则，不是建议：
+             -50  浅底（标签、提示条、选中态的底色）
+             -400 明亮色，只做图形：3D 标记、图标底、进度填充、色条。它对白底不到 3:1，不能承载文字或独立图标
+             -600 深色，承载文字：白字压在它上面 ≥ 4.5:1，它写在白底与自己的 -50 上也 ≥ 4.5:1
+           对比度逐对验算过，表在风格指南 3.2 节。 */
+
+        /* 中性：页面是带一点天色的浅底，面板是纯白；文字用藏青墨色而不是纯黑——纯黑在粉彩旁边发脏 */
+        --cute-bg:            #EEF7FA;
+        --cute-bg-2:          #F4FAEE;  /* 页面渐变的下端（薄荷），和天色一起读成「晴天的草地」 */
+        --cute-panel:         #FFFFFF;
+        --cute-panel-2:       #F3F7FA;  /* 面板内凹区：输入框、次级分组 */
+        --cute-panel-3:       #E9F0F5;  /* 悬停 / 按下的中性底 */
+        --cute-line:          #DCE6EE;  /* 面板描边、分隔线（装饰性，不承担边界识别） */
+        --cute-line-strong:   #C5D3DE;
+        --cute-line-input:    #7B8BA0;  /* 输入框边框：它是唯一的边界提示，按非文字对比 ≥ 3:1 取值 */
+        --cute-ink:           #1F2D44;  /* 主文字 13.8:1 */
+        --cute-ink-2:         #4B5B73;  /* 次文字 6.9:1 */
+        --cute-ink-3:         #5F6E84;  /* 弱文字 5.2:1（在 --cute-panel-3 上仍有 4.5:1，这是它的下限） */
+        --cute-disabled:      #EDF1F5;
+        --cute-disabled-ink:  #7D8A9C;
+        --cute-scrim:         rgba(31, 45, 68, 0.42);
+
+        /* 品牌与界面强调色 */
+        --cute-teal-50:   #E6F8F5;  --cute-teal-400:  #2CC5B0;  --cute-teal-600:  #127C6F;  --cute-teal-700: #0F7468;  --cute-teal-800: #0B5C52;
+        --cute-sky-50:    #E8F4FE;  --cute-sky-400:   #3BA4F5;  --cute-sky-600:   #1268B4;
+        --cute-sun-50:    #FFF6DC;  --cute-sun-400:   #FFC83D;  --cute-sun-600:   #8C6100;  --cute-sun-ink:  #4A3300;  --cute-sun-lip: #D99A00;
+        --cute-coral-50:  #FFECEA;  --cute-coral-400: #FF5F5A;  --cute-coral-500: #E5484D;  --cute-coral-600: #C4302E;  --cute-coral-800: #9A2321;
+
+        /* 委托类型色：界面卡片与 3D 标记用同一组 hex（-400 就是 3D 徽章的底色） */
+        --quest-transport-50: #E8F4FE;  --quest-transport-400: #3BA4F5;  --quest-transport-600: #1268B4;  /* 物资运输 · 天蓝 */
+        --quest-hunt-50:      #FFF0E5;  --quest-hunt-400:      #FF8C42;  --quest-hunt-600:      #B24A0C;  /* 魔物讨伐 · 橘橙 */
+        --quest-build-50:     #EEF8EA;  --quest-build-400:     #68C34A;  --quest-build-600:     #3D7A28;  /* 迷宫建设 · 草绿 */
+        --quest-envoy-50:     #FDEBF3;  --quest-envoy-400:     #F26DAA;  --quest-envoy-600:     #BE2E70;  /* 异界交涉 · 莓粉 */
+        --quest-rescue-50:    #FFECEA;  --quest-rescue-400:    #FF5F5A;  --quest-rescue-600:    #C4302E;  /* 紧急救援 · 珊瑚红 */
+
+        /* 状态色。紧急与「紧急救援」同一族：紧急本来就是同一种情绪，靠「!」与弹跳区分，不靠再造一个红 */
+        --cute-success-50: #E6F7EF;  --cute-success-400: #2DBE7E;  --cute-success-600: #1A7A50;
+        --cute-warn-50:    #FFF4DC;  --cute-warn-400:    #FFB020;  --cute-warn-600:    #8F5A00;
+        --cute-danger-50:  #FFECEA;  --cute-danger-400:  #FF5F5A;  --cute-danger-600:  #C4302E;
+
+        /* 焦点环：白色内圈把它和任何底色隔开，天蓝外圈对白底 5.7:1。所有可交互元素共用 */
+        --cute-focus-ring: 0 0 0 3px #FFFFFF, 0 0 0 5.5px #1268B4;
+
+        /* 字体：西文与数字先落到 Nunito，汉字再落到中文字体（Nunito 不含汉字，浏览器会逐字回退） */
+        --cute-font: 'Nunito', 'Noto Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
+        --cute-font-display: 'Nunito', 'ZCOOL KuaiLe', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+
+        /* 字号阶梯（px）：正文最小 14；12 只给 ≤ 6 个字、字重 ≥ 800 的角标 */
+        --cute-fs-cap: 12px;  --cute-fs-sm: 14px;  --cute-fs-body: 16px;  --cute-fs-lg: 18px;
+        --cute-fs-xl: 22px;   --cute-fs-2xl: 28px; --cute-fs-num: 32px;   --cute-fs-display: 40px;
+
+        /* 圆角：越大的容器圆角越大，套在里面的元素圆角 = 外层圆角 − 内边距，嵌套才不显得「夹」 */
+        --cute-r-xs: 8px;  --cute-r-sm: 12px;  --cute-r-md: 16px;  --cute-r-btn: 20px;  --cute-r-card: 20px;
+        --cute-r-lg: 24px; --cute-r-xl: 28px;  --cute-r-pill: 999px;  /* xl：模态与底部抽屉 */
+
+        /* 阴影：用藏青而不是黑色，投影才是「有颜色的软阴影」；float 档给压在 3D 画布上的面板，地图花，需要更强的分离 */
+        --cute-shadow-1: 0 1px 2px rgba(31, 45, 68, 0.08), 0 2px 6px rgba(31, 45, 68, 0.06);
+        --cute-shadow-2: 0 2px 4px rgba(31, 45, 68, 0.06), 0 8px 20px rgba(31, 45, 68, 0.10);
+        --cute-shadow-3: 0 6px 12px rgba(31, 45, 68, 0.08), 0 18px 44px rgba(31, 45, 68, 0.16);
+        --cute-shadow-float: 0 3px 0 rgba(31, 45, 68, 0.06), 0 10px 28px rgba(31, 45, 68, 0.20);
+
+        /* 间距：4 的倍数 */
+        --cute-sp-1: 4px;  --cute-sp-2: 8px;  --cute-sp-3: 12px; --cute-sp-4: 16px;
+        --cute-sp-5: 20px; --cute-sp-6: 24px; --cute-sp-8: 32px; --cute-sp-10: 40px;
+
+        /* 动效：可爱感来自「按下去会扁、弹出来会过冲」。单次动画都 ≤ 480ms，循环的待机动画另算且在减少动效下关闭 */
+        --cute-dur-tap:   90ms;   /* 按下的压扁 */
+        --cute-dur-fast:  160ms;  /* 悬停、颜色 */
+        --cute-dur-base:  240ms;  /* 状态切换 */
+        --cute-dur-pop:   380ms;  /* 弹出：模态、Toast、卡片 */
+        --cute-dur-sheet: 440ms;  /* 底部抽屉 */
+        --cute-ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);  /* 约 10% 过冲 */
+        --cute-ease-out:    cubic-bezier(0.22, 1, 0.36, 1);
+        --cute-ease-in:     cubic-bezier(0.55, 0, 0.75, 0.2);   /* 退场：先慢后快地「缩回去」 */
       }
 
       body {
